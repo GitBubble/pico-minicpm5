@@ -451,13 +451,16 @@ def main() -> int:
                 if spec == "/help":
                     print("Each prompt starts a fresh logical context while "
                           "the three model handles remain loaded. "
-                          f"Current max-new is {repl_max_new}. Use /max N to "
-                          "change it, /reset to mark a new transcript and "
-                          "/quit to exit.",
+                          f"Current max-new is {repl_max_new}; allowed range "
+                          f"is 1..{args.context - 1}. Effective output is also "
+                          "limited by prompt tokens. Use /max N to change it, "
+                          "/reset to mark a new transcript and /quit to exit.",
                           flush=True)
                     continue
                 if spec == "/max":
-                    print(f"max-new={repl_max_new}", flush=True)
+                    print(f"max-new={repl_max_new}; allowed=1..{args.context - 1}; "
+                          "effective output also depends on prompt length",
+                          flush=True)
                     continue
                 if spec.startswith("/max "):
                     try:

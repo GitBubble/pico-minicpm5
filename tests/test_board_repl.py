@@ -75,6 +75,7 @@ def test_repl_reuses_one_session_and_handles_commands(monkeypatch, capsys) -> No
     assert "Context reset." in output
     assert "Commands: /help, /max N, /reset, /quit" in output
     assert "max-new=64" in output
+    assert "allowed range is 1..1023" in output
 
 
 def _fake_python(tmp_path: Path) -> Path:

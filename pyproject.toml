@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pico-minicpm5"
+version = "0.1.0"
+description = "Reproducible MiniCPM5-1B ONNX and SS928/PICO three-handle build pipeline"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{name = "PicoNPU Enablement Contributors"}]
+keywords = ["MiniCPM5", "ONNX", "SS928", "PICO", "edge-ai"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = []
+
+[project.optional-dependencies]
+hub = ["huggingface_hub>=0.34"]
+onnx = ["numpy>=1.24", "onnx>=1.16", "safetensors>=0.4"]
+reference = ["numpy>=1.24", "torch>=2.2", "transformers>=4.48", "safetensors>=0.4"]
+dev = ["build>=1.2", "pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+pico-minicpm5 = "pico_minicpm5.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/GitBubble/pico-minicpm5"
+Source = "https://github.com/GitBubble/pico-minicpm5"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pico_minicpm5 = ["data/*.json"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

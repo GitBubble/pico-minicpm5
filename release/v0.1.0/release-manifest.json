@@ -1,0 +1,74 @@
+{
+  "schema": "pico.minicpm5.release.v1",
+  "release": "v0.1.0",
+  "source": {"package": "pico-minicpm5", "version": "0.1.0"},
+  "model": {
+    "repository": "openbmb/MiniCPM5-1B",
+    "revision": "4e9de7a0778dc1c362e983e6858f0e77542cbdca",
+    "relationship": "generated artifacts are derived from separately downloaded model weights"
+  },
+  "target": {
+    "soc": "SS928",
+    "npu_arch": "V101",
+    "context": 1024
+  },
+  "artifacts": {
+    "models/decode.om": {
+      "role": "decode-transformer",
+      "bytes": 686997372,
+      "sha256": "59d6bfc9f66edbacc90896f723320041fc6c352d85306054e090b13ecaf774b1",
+      "distribution": "optional-derived-model-asset"
+    },
+    "models/prefill.om": {
+      "role": "position-zero-transformer",
+      "bytes": 686999901,
+      "sha256": "fea09d294513839ccab846050193def475859f4352e2cb3fad7c2f8f1dfa4536",
+      "distribution": "optional-derived-model-asset"
+    },
+    "models/head_flat.om": {
+      "role": "vocabulary-head",
+      "bytes": 202651666,
+      "sha256": "fd6675f4aad9d7244471afc637f4964c79a7504b2c73a350985f2d807105330e",
+      "distribution": "optional-derived-model-asset"
+    },
+    "assets/token_embedding.f16.bin": {
+      "role": "token-embedding",
+      "bytes": 401080320,
+      "sha256": "5a93b589f0c5920021c95e04327c0771da2721d8eec2dd7ac1b283aa0d3b7df5",
+      "distribution": "optional-derived-model-asset"
+    },
+    "assets/tokenizer.json": {
+      "role": "tokenizer",
+      "bytes": 9894271,
+      "sha256": "3e065a558a034185fe299917b398685c1facd0169a9eea1e629eb30c171fed81",
+      "distribution": "optional-upstream-model-asset"
+    }
+  },
+  "abi": {
+    "handles": 3,
+    "transformer_public_inputs": 5,
+    "transformer_runtime_inputs": 7,
+    "transformer_outputs": 3
+  },
+  "qualification": {
+    "cosine_threshold_exclusive": 0.98,
+    "prefill_minimum_public_output": 0.996646042546888,
+    "decode_minimum_public_output": 0.9980232292994137,
+    "greedy_tokens_exact": 48,
+    "greedy_tokens_total": 48,
+    "tokens_per_second_range": [8.195, 8.595],
+    "eos": "PASS",
+    "overall": "PASS"
+  },
+  "known_diagnostic": {
+    "prefill_layer2_v_slice_cosine": 0.9711191219194694,
+    "blocking_under_public_output_gate": false
+  },
+  "excluded_external_components": [
+    "checkpoint weights",
+    "ATC and DDK",
+    "libinstsim",
+    "custom-op shared libraries",
+    "board runtime libraries and executor binaries"
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/GitBubble/pico-minicpm5/blob/main/schemas/runtime-capture.schema.json",
+  "title": "MiniCPM5 PICO runtime capture",
+  "type": "object",
+  "required": [
+    "schema",
+    "runner",
+    "status",
+    "role",
+    "position",
+    "context",
+    "om",
+    "build_manifest_sha256",
+    "inputs",
+    "outputs"
+  ],
+  "properties": {
+    "schema": {"const": "pico.minicpm5.runtime-capture.v1"},
+    "runner": {"enum": ["libinstsim", "ss928-board"]},
+    "status": {"const": "PASS"},
+    "role": {"enum": ["prefill", "decode", "head_flat"]},
+    "position": {"type": "integer", "minimum": 0},
+    "context": {"const": 1024},
+    "om": {"$ref": "#/$defs/hashRecord"},
+    "build_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "inputs": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/hashRecord"}
+    },
+    "outputs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "items": {"$ref": "#/$defs/hashRecord"}
+    }
+  },
+  "$defs": {
+    "hashRecord": {
+      "type": "object",
+      "required": ["bytes", "sha256"],
+      "properties": {
+        "bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

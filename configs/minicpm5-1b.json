@@ -1,0 +1,40 @@
+{
+  "schema": "pico.minicpm5.checkpoint.v1",
+  "repository": "openbmb/MiniCPM5-1B",
+  "revision": "4e9de7a0778dc1c362e983e6858f0e77542cbdca",
+  "license_declared_by_model_card": "apache-2.0",
+  "files": {
+    "config.json": {
+      "sha256": "6a6509b646cb3169616c5ffc3196e7ccaf9d4d6bc17b266581d241a31c217714"
+    },
+    "model.safetensors.index.json": {
+      "sha256": "162add042e75abc3d571c4a8679523fa4f1ffc55d1fea25fc6658a19d6e957ee"
+    },
+    "model-00000-of-00001.safetensors": {
+      "bytes": 2161290912,
+      "sha256": "7ab8fd86563125929be78aeec8cb3969c7ed2ead3be1ab9d3ec0a9fa69c8660d",
+      "header_bytes": 25240,
+      "header_prefix_sha256": "ecbdf640e2ce4cf283b3d6d7c758d7cf71cfbbd30c3aea04601f36f8999c5675"
+    },
+    "tokenizer.json": {
+      "bytes": 9894271,
+      "sha256": "3e065a558a034185fe299917b398685c1facd0169a9eea1e629eb30c171fed81"
+    }
+  },
+  "geometry": {
+    "architecture": "LlamaForCausalLM",
+    "model_type": "llama",
+    "hidden_size": 1536,
+    "intermediate_size": 4608,
+    "num_attention_heads": 16,
+    "num_key_value_heads": 2,
+    "head_dim": 128,
+    "num_hidden_layers": 24,
+    "vocab_size": 130560,
+    "max_position_embeddings": 131072,
+    "rope_theta": 5000000.0,
+    "rms_norm_eps": 0.000001,
+    "torch_dtype": "bfloat16",
+    "tie_word_embeddings": false
+  }
+}

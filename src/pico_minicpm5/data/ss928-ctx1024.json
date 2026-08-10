@@ -1,0 +1,42 @@
+{
+  "schema": "pico.minicpm5.target.v1",
+  "target": "SS928",
+  "npu_arch": "V101",
+  "context": 1024,
+  "past": 1023,
+  "families": {
+    "prefill": {
+      "selection": "position == 0",
+      "clip_preset": "calibration/prefill-clips.json"
+    },
+    "decode": {
+      "selection": "position >= 1",
+      "clip_preset": "calibration/decode-clips.json"
+    }
+  },
+  "transformer_public_abi": {
+    "inputs": [
+      "hidden",
+      "attention_mask",
+      "rope_r",
+      "k_cache_all",
+      "v_cache_all"
+    ],
+    "outputs": ["next_hidden", "k_cur_all", "v_cur_all"],
+    "input_count": 5,
+    "output_count": 3
+  },
+  "observed_runtime_abi": {
+    "input_count": 7,
+    "output_count": 3,
+    "note": "ATC adds two auxiliary runtime inputs; callers leave them zero"
+  },
+  "external_data": {
+    "enabled": true,
+    "layout": "one-file-per-tensor",
+    "reason": "avoid protobuf and signed-32-bit external-data offset limits"
+  },
+  "numeric_gate": {
+    "minimum_cosine_exclusive": 0.98
+  }
+}

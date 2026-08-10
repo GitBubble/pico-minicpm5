@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/GitBubble/pico-minicpm5/blob/main/schemas/release-manifest.schema.json",
+  "title": "pico-minicpm5 model release manifest",
+  "type": "object",
+  "required": ["schema", "model", "target", "abi", "artifacts"],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "enum": ["pico.minicpm5.release.v1", "pico.minicpm5.local-model-release.v1"]
+    },
+    "model": {
+      "type": "object",
+      "required": ["repository", "revision"],
+      "properties": {
+        "repository": {"type": "string"},
+        "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+      },
+      "additionalProperties": true
+    },
+    "target": {
+      "type": "object",
+      "required": ["soc", "npu_arch", "context"],
+      "properties": {
+        "soc": {"const": "SS928"},
+        "npu_arch": {"const": "V101"},
+        "context": {"const": 1024}
+      },
+      "additionalProperties": true
+    },
+    "abi": {
+      "type": "object",
+      "required": ["handles", "transformer_public_inputs", "transformer_outputs"],
+      "properties": {
+        "handles": {"const": 3},
+        "transformer_public_inputs": {"const": 5},
+        "transformer_runtime_inputs": {"const": 7},
+        "transformer_outputs": {"const": 3}
+      },
+      "additionalProperties": true
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["role", "bytes", "sha256"],
+        "properties": {
+          "role": {"type": "string"},
+          "bytes": {"type": "integer", "minimum": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

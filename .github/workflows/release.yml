@@ -1,0 +1,44 @@
+name: source-release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify tag matches package version
+        run: |
+          VERSION=$(PYTHONPATH=src python -c 'from pico_minicpm5 import __version__; print(__version__)')
+          test "$GITHUB_REF_NAME" = "v$VERSION"
+      - run: pip install -e '.[onnx,dev]'
+      - run: pytest
+      - name: Set reproducible timestamp
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
+      - run: python -m build
+      - run: PYTHONPATH=src python -m pico_minicpm5.cli release source --out artifacts
+      - run: PYTHONPATH=src python -m pico_minicpm5.cli release sbom --out artifacts/pico-minicpm5-0.1.0.spdx.json
+      - name: Checksum all source artifacts
+        run: |
+          tmp=artifacts/.SHA256SUMS.tmp
+          trap 'rm -f "$tmp"' EXIT
+          find dist artifacts -maxdepth 1 -type f \
+            ! -name SHA256SUMS ! -name .SHA256SUMS.tmp -print0 \
+            | sort -z \
+            | xargs -0 sha256sum > "$tmp"
+          mv "$tmp" artifacts/SHA256SUMS
+          trap - EXIT
+          sha256sum -c artifacts/SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*
+            artifacts/*

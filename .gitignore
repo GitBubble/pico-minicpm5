@@ -1,0 +1,16 @@
+/artifacts/
+/work/
+/model/
+.venv/
+.ruff_cache/
+.mypy_cache/
+.coverage
+*.onnx
+*.om
+*.safetensors
+*.image_list
+__pycache__/
+.pytest_cache/
+*.egg-info/
+dist/
+build/

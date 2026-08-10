@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this compiler enablement project, please cite it and the upstream MiniCPM project."
+title: "pico-minicpm5"
+version: 0.1.0
+date-released: 2026-08-09
+license: Apache-2.0
+repository-code: "https://github.com/GitBubble/pico-minicpm5"
+authors:
+  - family-names: "PicoNPU Enablement Contributors"

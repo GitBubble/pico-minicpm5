@@ -1,0 +1,12 @@
+pico-minicpm5
+Copyright 2026 PicoNPU Enablement Contributors
+
+This product includes software developed for the PicoNPU / SVP_NNN compiler
+enablement project.
+
+MiniCPM5-1B is developed by OpenBMB and is obtained separately from
+https://huggingface.co/openbmb/MiniCPM5-1B. No model weights are included in
+the source distribution.
+
+ATC, DDK, libinstsim, board runtime libraries and custom-op shared objects are
+external user-supplied components and are not distributed by this project.

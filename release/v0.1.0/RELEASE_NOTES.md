@@ -27,3 +27,8 @@ from the original `8.20–8.60 token/s` range to `9.42–9.48 token/s` while kee
 Board application source, executor C and its Makefile now live under `app/`.
 The compiled executor is carried only by the runtime archive; duplicate
 standalone executor source/binary/Makefile assets are retired.
+
+The runtime now also exposes a resident stdin REPL. Running `app/chat.sh`
+without arguments loads the three handles once and accepts repeated prompts;
+`/help`, `/reset` and `/quit` are built in. One-shot `--prompt` execution stays
+compatible.

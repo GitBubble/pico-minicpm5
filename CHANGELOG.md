@@ -14,6 +14,8 @@
   greedy tokens exact, EOS and Chinese prompts passing.
 - Consolidated the Release layout: executor source, Makefile and demo are no
   longer duplicated as standalone assets.
+- Added a resident stdin REPL (`/help`, `/reset`, `/quit`) so repeated prompts
+  reuse the three loaded handles; no-argument `app/chat.sh` enters it directly.
 
 - Initial open-source pipeline from pinned MiniCPM5-1B checkpoint to real-weight
   layer ONNX, packed 24-layer prefill/decode ONNX, external ATC compilation and

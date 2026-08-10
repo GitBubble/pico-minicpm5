@@ -29,14 +29,32 @@ SDK 环境提供，开源仓库和 Release 不会重新分发这些动态库。
 cd /opt/pico-minicpm5
 chmod +x app/chat.sh app/bin/pico_persistent_acl_executor.aarch64
 
-# 英文续写
-PROMPT='The capital of France is' MAX_NEW=16 sh app/chat.sh
+# 直接进入常驻 REPL，三个模型句柄只加载一次
+./app/chat.sh
+```
+
+```text
+MiniCPM5 REPL ready. Commands: /help, /reset, /quit
+You> 请用一句话解释什么是神经网络。
+MiniCPM> ...
+You> /quit
+```
+
+REPL 中每次输入都开始一个新的 ctx1024 逻辑序列，但模型句柄、
+executor 进程和板端缓冲区保持常驻，避免每个问题重新加载模型的约
+10 秒开销。`/reset` 会在可选 JSON 报告中标记新的 transcript。当前是
+独立轮次的文本续写 REPL，不会自动拼接 chat-template 多轮历史。
+
+单次非交互执行：
+
+```bash
+./app/chat.sh --prompt 'The capital of France is' --max-new 16
 
 # 中文生成
-PROMPT='请用一句话解释什么是神经网络。' MAX_NEW=32 sh app/chat.sh
+./app/chat.sh --prompt '请用一句话解释什么是神经网络。' --max-new 32
 
 # 算术与 EOS 路径
-PROMPT='1+1 equals' MAX_NEW=16 sh app/chat.sh
+./app/chat.sh --prompt '1+1 equals' --max-new 16
 ```
 
 `chat.sh` 支持下列环境变量，脚本名之后的额外参数会继续传给板端 server：
@@ -44,11 +62,14 @@ PROMPT='1+1 equals' MAX_NEW=16 sh app/chat.sh
 | 变量 | 默认值 | 用途 |
 |---|---|---|
 | `PICO_MINICPM5_ROOT` | `app/` 的上级目录 | 部署根目录 |
-| `PICO_RUNTIME_LIB` | `/opt/ss928-runtime/lib` | 板端运行库目录 |
-| `PYTHON` | `python3` | Python 可执行文件 |
+| `PICO_RUNTIME_LIB` | 自动探测 | 板端运行库目录 |
+| `PYTHON` | 自动探测 | Python 可执行文件 |
 | `TOKENIZERS` | 空 | 可选的额外 `site-packages` 路径 |
-| `PROMPT` | `The capital of France is` | 输入提示词 |
+| `PROMPT` | 未设置 | 可选单次 prompt；未设置时进入 REPL |
 | `MAX_NEW` | `24` | 最大生成 token 数 |
+
+运行库依次探测 `/root/pico_default_smoke/lib` 和 `/opt/ss928-runtime/lib`；
+Python 依次探测 `$PICO_MINICPM5_ROOT/venv/bin/python` 和 `python3`。
 
 ## 快速排障
 

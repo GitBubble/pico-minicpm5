@@ -79,7 +79,7 @@ tar cf - . | ssh root@BOARD_IP \
   'mkdir -p /opt/pico-minicpm5 && tar xf - -C /opt/pico-minicpm5'
 
 ssh root@BOARD_IP \
-  'PICO_MINICPM5_ROOT=/opt/pico-minicpm5 PICO_RUNTIME_LIB=/root/pico_default_smoke/lib PROMPT="The capital of France is" MAX_NEW=16 sh /opt/pico-minicpm5/app/chat.sh'
+  '/opt/pico-minicpm5/app/chat.sh'
 ```
 
 The accepted board image provides the licensed runtime libraries under
@@ -95,8 +95,11 @@ is:
 
 ```bash
 cd /opt/pico-minicpm5
-PROMPT='请用一句话解释什么是神经网络。' MAX_NEW=32 sh app/chat.sh
+./app/chat.sh
 ```
+
+This starts a resident REPL with `/help`, `/reset` and `/quit`. For a one-shot
+run use `./app/chat.sh --prompt 'The capital of France is' --max-new 16`.
 
 ## Quick start
 

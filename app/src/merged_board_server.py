@@ -351,6 +351,9 @@ def main() -> int:
     ap.add_argument("--timeout", type=float, default=1800.0)
     ap.add_argument("--prompt", action="append", default=[])
     ap.add_argument("--prompt-ids", action="append", default=[])
+    ap.add_argument(
+        "--interactive", action="store_true",
+        help="keep the three model handles loaded and read prompts from stdin")
     ap.add_argument("--max-new", type=int, default=16)
     ap.add_argument("--report", type=Path)
     ap.add_argument("--start-position", type=int, default=0)
@@ -364,6 +367,15 @@ def main() -> int:
         ap.error("--capture-dir and --capture-position must be provided together")
     if args.capture_position is not None and args.capture_position < 0:
         ap.error("--capture-position must be nonnegative")
+    if args.interactive and args.tokenizer is None:
+        ap.error("--interactive requires --tokenizer")
+    if args.interactive and (
+            args.prompt_ids or args.start_position != 0 or args.kv_in is not None
+            or args.kv_out is not None or args.stop_after is not None
+            or args.capture_dir is not None):
+        ap.error("--interactive is incompatible with prompt-id/KV/capture controls")
+    if not args.interactive and not args.prompt and not args.prompt_ids:
+        ap.error("provide --prompt, --prompt-ids or --interactive")
 
     began = time.perf_counter()
     session = Merged(executable=args.persistent_executor,
@@ -376,23 +388,31 @@ def main() -> int:
     print(f"loaded {len(session.models)} handles in {load_ms / 1000:.1f} s; "
           f"kv slots {session.kv_slots}", flush=True)
     results = []
+
+    def run_text_prompt(spec, *, repl=False, repl_epoch=0):
+        ids = [0] + list(session.tokenizer.encode(
+            spec, add_special_tokens=False).ids)
+        reason, out, steps = session.generate(
+            ids, args.max_new, {1, 130073}, start=args.start_position,
+            kv_in=args.kv_in, kv_out=args.kv_out,
+            stop_after=args.stop_after, capture_dir=args.capture_dir,
+            capture_position=args.capture_position)
+        text = session.tokenizer.decode(out, skip_special_tokens=True)
+        record = {"prompt": spec, "ids": out, "text": text,
+                  "reason": reason, "step_ms": steps,
+                  "phase_ms": session.last_phase_steps}
+        if repl:
+            record.update(mode="repl", repl_epoch=repl_epoch)
+        return record, steps[len(ids) - 1:]
+
     try:
         for spec in args.prompt:
-            ids = [0] + list(session.tokenizer.encode(
-                spec, add_special_tokens=False).ids)
-            reason, out, steps = session.generate(
-                ids, args.max_new, {1, 130073}, start=args.start_position,
-                kv_in=args.kv_in, kv_out=args.kv_out,
-                stop_after=args.stop_after, capture_dir=args.capture_dir,
-                capture_position=args.capture_position)
-            text = session.tokenizer.decode(out, skip_special_tokens=True)
-            gen = steps[len(ids) - 1:]
-            print(f"prompt={spec!r}\n  ids={out}\n  text={text!r}\n"
-                  f"  reason={reason} steps_ms={[round(s,1) for s in gen]}",
+            record, gen = run_text_prompt(spec)
+            print(f"prompt={spec!r}\n  ids={record['ids']}\n"
+                  f"  text={record['text']!r}\n  reason={record['reason']} "
+                  f"steps_ms={[round(s,1) for s in gen]}",
                   flush=True)
-            results.append({"prompt": spec, "ids": out, "text": text,
-                            "reason": reason, "step_ms": steps,
-                            "phase_ms": session.last_phase_steps})
+            results.append(record)
         for spec in args.prompt_ids:
             ids = [int(v) for v in spec.split(",")]
             reason, out, steps = session.generate(
@@ -405,6 +425,37 @@ def main() -> int:
             results.append({"prompt_ids": ids, "ids": out, "reason": reason,
                             "step_ms": steps,
                             "phase_ms": session.last_phase_steps})
+        if args.interactive:
+            print("MiniCPM5 REPL ready. Commands: /help, /reset, /quit",
+                  flush=True)
+            epoch = 0
+            while True:
+                try:
+                    spec = input("You> ").strip()
+                except EOFError:
+                    print("", flush=True)
+                    break
+                except KeyboardInterrupt:
+                    print("\nUse /quit or Ctrl-D to exit.", flush=True)
+                    continue
+                if not spec:
+                    continue
+                if spec in {"/quit", "/exit"}:
+                    break
+                if spec == "/help":
+                    print("Each prompt starts a fresh logical context while "
+                          "the three model handles remain loaded. "
+                          "Use /reset to mark a new transcript and /quit to exit.",
+                          flush=True)
+                    continue
+                if spec == "/reset":
+                    epoch += 1
+                    print("Context reset.", flush=True)
+                    continue
+                record, _gen = run_text_prompt(
+                    spec, repl=True, repl_epoch=epoch)
+                results.append(record)
+                print(f"MiniCPM> {record['text']}", flush=True)
     finally:
         session.close()
     if args.report:

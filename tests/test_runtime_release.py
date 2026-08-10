@@ -16,6 +16,8 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path]:
     (root / "release/v0.1.0").mkdir(parents=True)
     (root / "app/chat.sh").write_text("#!/bin/sh\n", encoding="utf-8")
     (root / "app/native/Makefile").write_text("all:\n\ttrue\n", encoding="utf-8")
+    (root / "app/src/__pycache__").mkdir(parents=True)
+    (root / "app/src/__pycache__/server.cpython-311.pyc").write_bytes(b"cache")
     for name in ("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "MODEL_PROVENANCE.md"):
         (root / name).write_text(name + "\n", encoding="utf-8")
     elf = bytearray(64)
@@ -42,6 +44,7 @@ def test_runtime_archive_has_one_app_layout(tmp_path: Path) -> None:
     assert any(name.endswith("/app/chat.sh") for name in names)
     assert any(name.endswith("/app/native/Makefile") for name in names)
     assert any(name.endswith("/app/bin/pico_persistent_acl_executor.aarch64") for name in names)
+    assert not any("__pycache__" in name or name.endswith(".pyc") for name in names)
     assert not any("/demo/" in name or name.endswith("/chat.sh") and "/app/" not in name
                    for name in names)
 

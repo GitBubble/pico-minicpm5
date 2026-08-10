@@ -36,11 +36,15 @@ def create_runtime_archive(*, project_root: Path, executor: Path, output_dir: Pa
     binary = _executor_bytes(executor, manifest)
     files: dict[str, tuple[bytes, int]] = {}
     for path in sorted((project_root / "app").rglob("*")):
+        relative = path.relative_to(project_root)
+        if "__pycache__" in relative.parts or path.suffix in {".pyc", ".pyo"} \
+                or path.name == ".DS_Store":
+            continue
         if path.is_symlink():
             raise ValueError(f"runtime application symlink is forbidden: {path}")
         if path.is_file():
-            relative = path.relative_to(project_root).as_posix()
-            files[relative] = (path.read_bytes(), 0o755 if os.access(path, os.X_OK) else 0o644)
+            name = relative.as_posix()
+            files[name] = (path.read_bytes(), 0o755 if os.access(path, os.X_OK) else 0o644)
     files["app/bin/pico_persistent_acl_executor.aarch64"] = (binary, 0o755)
     for name in ("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "MODEL_PROVENANCE.md"):
         files[name] = ((project_root / name).read_bytes(), 0o644)

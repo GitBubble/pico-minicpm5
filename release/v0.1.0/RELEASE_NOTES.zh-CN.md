@@ -19,3 +19,7 @@ EOS 和中文路径通过。
 板端应用源码、executor C 和 Makefile 统一归档到 `app/`。预编译
 executor 只放入 runtime 包的 `app/bin/`；不再发布 executor 源码、
 Makefile、二进制和 `chat.sh` 的独立重复 Asset。
+
+runtime 新增常驻 stdin REPL。无参数运行 `app/chat.sh` 只加载一次三个
+模型句柄，随后可连续输入 prompt；内置 `/help`、`/reset` 和 `/quit`。
+原有单次 `--prompt` 用法保持兼容。

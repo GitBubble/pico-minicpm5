@@ -39,6 +39,51 @@ These are SS928 measurements. They are not a claim that every Hi3403 product
 configuration has been qualified. The upstream checkpoint advertises a much
 longer context; this release contract is intentionally fixed at `1024`.
 
+## Deploy the prebuilt SS928 demo
+
+Release [`v0.1.0`](https://github.com/GitBubble/pico-minicpm5/releases/tag/v0.1.0)
+contains the accepted three-handle deployment: `prefill.om`, `decode.om`,
+`head_flat.om`, the token embedding and tokenizer, plus a small runtime archive
+with `chat.sh`, the board server, the resident AArch64 executor and its C++
+source/Makefile. The three OM files correspond to position-0 prefill, recurrent
+decode and the vocabulary projection head respectively.
+
+Download and arrange the files on the host:
+
+```bash
+mkdir pico-minicpm5-deployment-v0.1.0
+cd pico-minicpm5-deployment-v0.1.0
+
+gh release download v0.1.0 --repo GitBubble/pico-minicpm5 \
+  --pattern 'pico-minicpm5-runtime-v0.1.0.tar.gz' \
+  --pattern 'prefill.om' --pattern 'decode.om' --pattern 'head_flat.om' \
+  --pattern 'token_embedding.f16.bin' --pattern 'tokenizer.json'
+
+tar xzf pico-minicpm5-runtime-v0.1.0.tar.gz --strip-components=1
+mkdir -p models assets
+mv prefill.om decode.om head_flat.om models/
+mv token_embedding.f16.bin tokenizer.json assets/
+sha256sum -c SHA256SUMS
+```
+
+Copy the assembled directory to the board and start the demo:
+
+```bash
+tar cf - . | ssh root@BOARD_IP \
+  'mkdir -p /root/minicpm5_gate_3handle && tar xf - -C /root/minicpm5_gate_3handle'
+
+ssh root@BOARD_IP \
+  'GATE=/root/minicpm5_gate_3handle PROMPT="The capital of France is" MAX_NEW=16 sh /root/minicpm5_gate_3handle/chat.sh'
+```
+
+The accepted board image provides the licensed runtime libraries under
+`/root/pico_default_smoke/lib`; they are intentionally not redistributed in
+this repository or release. Override `TOKENIZERS` if the board's `tokenizers`
+Python package is installed somewhere other than the path used by `chat.sh`.
+The runtime archive also contains `native/pico_persistent_acl_executor.c` and
+`.mk` so the executor can be rebuilt with the SS928 cross-toolchain instead of
+using the supplied AArch64 binary.
+
 ## Quick start
 
 ```bash

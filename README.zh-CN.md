@@ -1,0 +1,112 @@
+# pico-minicpm5
+
+[English](README.md) · [板端 Demo](app/README.zh-CN.md)
+
+`pico-minicpm5` 将固定版本的
+[`openbmb/MiniCPM5-1B`](https://huggingface.co/openbmb/MiniCPM5-1B)
+转换为可复现的 SS928/PICO 三句柄部署：
+
+```text
+Hugging Face checkpoint
+  → 真实权重的 24 层 ONNX 与词表 head
+  → 图级串联并打包 K/V
+  → 分别编译 prefill.om、decode.om、head_flat.om
+  → 数值门禁、板端验收与 Release
+```
+
+生产路线是在编译前组合 ONNX 图，而不是拼接多个 OM 二进制。图编译器统一负责
+内存分配、指令调度、TaskInfo 和层间 hidden bridge。
+
+## 当前状态
+
+冻结的 `ctx1024` 候选已在 SS928 上完成验收：
+
+- prefill 公开输出最低 cosine：`0.996646`；
+- decode 公开输出最低 cosine：`0.998023`；
+- 生成 token 与官方 checkpoint 的 FP64 oracle 对比为 `48/48`；
+- EOS 与中文生成路径通过；
+- `8.20–8.60 token/s`，约为已验收 49 句柄基线的 `1.67x`。
+
+这些数字只对应已记录的 SS928 配置和三个冻结 OM 哈希，不代表所有 Hi3403 产品
+配置。本 Release 的上下文合同固定为 1024。
+
+## 直接在板端运行
+
+最短路径请阅读 [`app/README.zh-CN.md`](app/README.zh-CN.md)。当 Release 文件
+已经放到板端后，只需：
+
+```bash
+cd /root/minicpm5_gate_3handle
+PROMPT='请用一句话解释什么是神经网络。' MAX_NEW=32 sh app/chat.sh
+```
+
+从 Release 下载和整理文件：
+
+```bash
+mkdir pico-minicpm5-deployment-v0.1.0
+cd pico-minicpm5-deployment-v0.1.0
+gh release download v0.1.0 --repo GitBubble/pico-minicpm5 \
+  --pattern 'pico-minicpm5-runtime-v0.1.0.tar.gz' \
+  --pattern 'prefill.om' --pattern 'decode.om' --pattern 'head_flat.om' \
+  --pattern 'token_embedding.f16.bin' --pattern 'tokenizer.json'
+tar xzf pico-minicpm5-runtime-v0.1.0.tar.gz --strip-components=1
+mkdir -p models assets
+mv prefill.om decode.om head_flat.om models/
+mv token_embedding.f16.bin tokenizer.json assets/
+sha256sum -c SHA256SUMS
+```
+
+然后传到板端：
+
+```bash
+tar cf - . | ssh root@BOARD_IP \
+  'mkdir -p /root/minicpm5_gate_3handle && tar xf - -C /root/minicpm5_gate_3handle'
+```
+
+板端运行库默认位于 `/root/pico_default_smoke/lib`，这些 SDK 动态库不会在开源
+项目中重新分发。runtime 包提供 AArch64 executor 二进制，并在 `native/` 中同时
+提供其 C++ 源码和 Makefile。
+
+## 从源码构建
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+pip install -e '.[hub,onnx,reference,dev]'
+
+pico-minicpm5 model fetch --local-dir work/model
+pico-minicpm5 model verify --model-dir work/model
+pico-minicpm5 reference capture --model-dir work/model --out work/reference --context 1024
+pico-minicpm5 reference calibrate --reference work/reference --family decode --out work/calibration/decode
+pico-minicpm5 reference calibrate --reference work/reference --family prefill --out work/calibration/prefill
+pico-minicpm5 onnx export-layers --model-dir work/model --out work/onnx/layers --context 1024
+pico-minicpm5 onnx export-head --model-dir work/model --out work/onnx/head/model.onnx
+```
+
+随后分别组合 decode/prefill 的 24 层图，并使用本地合法安装的 ATC/DDK 与
+`libsvp_custom.so` 编译三只 OM。完整命令、runtime capture、score、head bridge
+和 qualification 流程见 [`docs/PIPELINE.zh-CN.md`](docs/PIPELINE.zh-CN.md)。
+
+## 发布边界
+
+源码仓库包含 Python 包、配置、schema、测试和文档。模型权重、ONNX external
+data、OM、token embedding、ATC/DDK/libinstsim、SDK 动态库和私有板端信息不会
+进入源码归档。预编译的模型派生产物通过独立 Release asset 发布，并记录来源、
+大小与 SHA-256。
+
+更多中文文档：
+
+- [端到端流水线](docs/PIPELINE.zh-CN.md)
+- [OM 图级组合合同](docs/OM_COMPOSITION.zh-CN.md)
+- [验证阶梯](docs/VALIDATION.zh-CN.md)
+- [SDK 环境](docs/SDK_SETUP.zh-CN.md)
+- [发布策略](docs/RELEASE.zh-CN.md)
+- [SS928 验收](docs/SS928_ACCEPTANCE.zh-CN.md)
+
+开发检查：
+
+```bash
+pytest
+pico-minicpm5 doctor
+pico-minicpm5 release source --check-only
+```

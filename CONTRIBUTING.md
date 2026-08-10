@@ -1,5 +1,7 @@
 # Contributing
 
+[中文](CONTRIBUTING.zh-CN.md)
+
 Keep changes reproducible and separable from private toolchains.
 
 1. Add a tiny-fixture unit test for graph or manifest changes.

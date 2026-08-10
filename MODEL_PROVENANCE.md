@@ -1,5 +1,7 @@
 # Model provenance
 
+[中文](MODEL_PROVENANCE.zh-CN.md)
+
 - Repository: `openbmb/MiniCPM5-1B`
 - Revision: `4e9de7a0778dc1c362e983e6858f0e77542cbdca`
 - Architecture: standard `LlamaForCausalLM`

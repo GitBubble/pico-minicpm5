@@ -1,5 +1,7 @@
 # Changelog
 
+[中文](CHANGELOG.zh-CN.md)
+
 ## 0.1.0 - 2026-08-09
 
 - Initial open-source pipeline from pinned MiniCPM5-1B checkpoint to real-weight

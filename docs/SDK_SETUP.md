@@ -1,5 +1,7 @@
 # External SDK setup
 
+[中文](SDK_SETUP.zh-CN.md)
+
 This project does not distribute ATC, DDK, libinstsim, board libraries,
 container images or `libsvp_custom.so`.
 

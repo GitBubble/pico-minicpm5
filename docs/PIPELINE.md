@@ -1,5 +1,7 @@
 # End-to-end pipeline
 
+[中文](PIPELINE.zh-CN.md)
+
 ## 1. Fetch and freeze the source model
 
 ```bash

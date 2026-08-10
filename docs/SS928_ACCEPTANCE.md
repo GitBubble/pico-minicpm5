@@ -1,5 +1,7 @@
 # Frozen SS928 ctx1024 acceptance
 
+[中文](SS928_ACCEPTANCE.zh-CN.md)
+
 The accepted 2026-08-09 three-handle candidate is identified in
 `release/v0.1.0/release-manifest.json`.
 

@@ -1,5 +1,7 @@
 # pico-minicpm5 v0.1.0
 
+[中文](RELEASE_NOTES.zh-CN.md)
+
 This source release captures the reproducible MiniCPM5-1B → ONNX → packed
 24-layer PICO OM workflow and the accepted SS928 ctx1024 three-handle artifact
 contract.

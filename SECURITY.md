@@ -1,5 +1,7 @@
 # Security
 
+[中文](SECURITY.zh-CN.md)
+
 Please report vulnerabilities privately to the repository maintainers before
 opening a public issue. Do not attach checkpoints, SDK archives, board
 credentials, proprietary shared objects, mapper dumps or raw production data.

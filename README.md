@@ -1,5 +1,7 @@
 # pico-minicpm5
 
+[中文说明](README.zh-CN.md) · [Board demo](app/README.md) · [板端 Demo](app/README.zh-CN.md)
+
 `pico-minicpm5` turns the pinned
 [`openbmb/MiniCPM5-1B`](https://huggingface.co/openbmb/MiniCPM5-1B)
 checkpoint into a reproducible SS928/PICO deployment:
@@ -83,6 +85,15 @@ Python package is installed somewhere other than the path used by `chat.sh`.
 The runtime archive also contains `native/pico_persistent_acl_executor.c` and
 `.mk` so the executor can be rebuilt with the SS928 cross-toolchain instead of
 using the supplied AArch64 binary.
+
+If the release files are already present on the board, skip all host-side
+steps and follow [`app/README.md`](app/README.md). The shortest board command
+is:
+
+```bash
+cd /root/minicpm5_gate_3handle
+PROMPT='请用一句话解释什么是神经网络。' MAX_NEW=32 sh app/chat.sh
+```
 
 ## Quick start
 

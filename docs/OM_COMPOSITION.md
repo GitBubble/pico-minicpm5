@@ -1,5 +1,7 @@
 # OM composition contract
 
+[中文](OM_COMPOSITION.zh-CN.md)
+
 The shipping method composes graphs, then compiles the result once. This lets
 the graph compiler own allocation, instruction scheduling, runtime TaskInfo
 and the physical hidden bridge.

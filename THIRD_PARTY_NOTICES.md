@@ -1,5 +1,7 @@
 # Third-party notices
 
+[中文](THIRD_PARTY_NOTICES.zh-CN.md)
+
 | Component | Use | Distribution policy |
 |---|---|---|
 | OpenBMB MiniCPM5-1B | Checkpoint and tokenizer | Downloaded directly by the user at a pinned revision; absent from source archives |

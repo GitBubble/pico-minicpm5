@@ -1,5 +1,7 @@
 # Validation ladder
 
+[中文](VALIDATION.zh-CN.md)
+
 1. Checkpoint: pinned revision, hashes, geometry, symbols and BF16 spans.
 2. Graph: ONNX checker with known custom ops stubbed, unique prefixes, no
    dangling values, five public inputs and three outputs at depth 24.

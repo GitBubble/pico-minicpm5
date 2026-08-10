@@ -1,5 +1,7 @@
 # Release policy
 
+[中文](RELEASE.zh-CN.md)
+
 ## Source release
 
 ```bash

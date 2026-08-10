@@ -1,5 +1,7 @@
 # Experimental OM post-linking
 
+[中文](README.zh-CN.md)
+
 Binary OM post-linking is not part of the supported build pipeline.
 
 The accepted three-handle release composes all 24 decoder layers at the ONNX

@@ -71,11 +71,29 @@ def test_repl_reuses_one_session_and_handles_commands(monkeypatch, capsys) -> No
     assert calls == [[0, 5], [0, 5]]
     output = capsys.readouterr().out
     assert output.count("loaded 3 handles") == 1
-    assert "MiniCPM> reply-101" in output
+    assert "MiniCPM 5" in output
+    assert "ctx1024 · resident KV · streaming" in output
+    assert "MiniCPM ✦ reply-101" in output
     assert "Context reset." in output
-    assert "Commands: /help, /max N, /reset, /quit" in output
+    assert "Commands: /help · /max N · /reset · /quit" in output
     assert "max-new=64" in output
     assert "allowed range is 1..1023" in output
+
+
+def test_terminal_ui_color_can_be_forced(monkeypatch, capsys) -> None:
+    server = _server_module()
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    ui = server.TerminalUI(
+        active=True, context=1024, color="always", spinner=False)
+
+    ui.banner()
+    ui.ready(3, 10.25)
+
+    output = capsys.readouterr().out
+    assert "\033[" in output
+    assert "MiniCPM 5" in output
+    assert "ctx1024" in output
+    assert "loaded" in output
 
 
 def _fake_python(tmp_path: Path) -> Path:
@@ -100,6 +118,7 @@ def test_chat_sh_defaults_to_repl_and_forwards_explicit_prompt(tmp_path: Path) -
         capture_output=True, check=True).stdout.splitlines()
     assert "--interactive" in repl
     assert "--prompt" not in repl
+    assert repl[repl.index("--context") + 1] == "1024"
 
     one_shot = subprocess.run(
         ["sh", str(script), "--prompt", "hello", "--max-new", "7"],

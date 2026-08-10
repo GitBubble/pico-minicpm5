@@ -34,19 +34,35 @@ chmod +x app/chat.sh app/bin/pico_persistent_acl_executor.aarch64
 ```
 
 ```text
-MiniCPM5 REPL ready. Commands: /help, /max N, /reset, /quit
-You> 请用一句话解释什么是神经网络。
-MiniCPM> ...
-You> /quit
+        /\_/\
+       ( o.o )    MiniCPM 5
+        > ^ <     SS928 local AI
+     ctx1024 · resident KV · streaming
+
+⠹ Loading three resident model handles  6.4s
+✓ ready · loaded 3 handles · ctx1024 · 10.2s
+Commands: /help · /max N · /reset · /quit
+You ❯ 请用一句话解释什么是神经网络。
+⠴ MiniCPM is thinking  0.8s
+MiniCPM ✦ ...
+You ❯ /quit
 ```
 
-REPL 中每次输入都开始一个新的 ctx1024 逻辑序列，但模型句柄、
+板端 Demo 的默认上下文固定为 `ctx1024`。REPL 中每次输入都开始一个新的
+ctx1024 逻辑序列，但模型句柄、
 executor 进程和板端缓冲区保持常驻，避免每个问题重新加载模型的约
-10 秒开销。文本会随 token 生成逐步显示。默认回答上限是 128 token，
+10 秒开销。模型加载和首 token 等待时会显示带耗时的动态状态，文本随后按
+token 流式显示；每轮结束会显示 token 数、速度和停止原因。默认回答上限是
+128 token，
 `/max N` 可在不重启模型的情况下查看或调整。ctx1024 下 `N` 可为
 1–1023，实际可生成长度还会扣除输入 prompt 占用的
 token。`/reset` 会在可选 JSON 报告中标记新的 transcript。当前是
 独立轮次的文本续写 REPL，不会自动拼接 chat-template 多轮历史。
+
+颜色和动画默认只在交互式终端开启；重定向、管道和日志输出自动保持为稳定的
+纯文本。可使用 `NO_COLOR=1 ./app/chat.sh` 关闭颜色，或添加
+`--no-spinner` 关闭动画。`--color always|never|auto` 和环境变量
+`PICO_MINICPM5_COLOR` 可显式控制颜色策略。
 
 单次非交互执行：
 
@@ -70,6 +86,8 @@ token。`/reset` 会在可选 JSON 报告中标记新的 transcript。当前是
 | `TOKENIZERS` | 空 | 可选的额外 `site-packages` 路径 |
 | `PROMPT` | 未设置 | 可选单次 prompt；未设置时进入 REPL |
 | `MAX_NEW` | `128` | 初始最大生成 token 数 |
+| `PICO_MINICPM5_COLOR` | `auto` | `auto`、`always` 或 `never` |
+| `NO_COLOR` | 未设置 | 设置后在 auto 模式关闭 ANSI 颜色 |
 
 运行库依次探测 `/root/pico_default_smoke/lib` 和 `/opt/ss928-runtime/lib`；
 Python 依次探测 `$PICO_MINICPM5_ROOT/venv/bin/python` 和 `python3`。

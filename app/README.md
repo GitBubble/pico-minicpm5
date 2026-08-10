@@ -36,20 +36,37 @@ chmod +x app/chat.sh app/bin/pico_persistent_acl_executor.aarch64
 ```
 
 ```text
-MiniCPM5 REPL ready. Commands: /help, /max N, /reset, /quit
-You> The capital of France is
-MiniCPM>  Paris, ...
-You> /quit
+        /\_/\
+       ( o.o )    MiniCPM 5
+        > ^ <     SS928 local AI
+     ctx1024 · resident KV · streaming
+
+⠹ Loading three resident model handles  6.4s
+✓ ready · loaded 3 handles · ctx1024 · 10.2s
+Commands: /help · /max N · /reset · /quit
+You ❯ The capital of France is
+⠴ MiniCPM is thinking  0.8s
+MiniCPM ✦  Paris, ...
+You ❯ /quit
 ```
 
-Each REPL prompt starts a fresh logical ctx1024 sequence; the model handles,
+The board demo defaults to `ctx1024`. Each REPL prompt starts a fresh logical
+ctx1024 sequence; the model handles,
 executor process and allocated device buffers stay resident. This avoids the
-roughly 10-second model reload between questions. Output is streamed as tokens
-are generated. The default response limit is 128 tokens; `/max N` displays or
+roughly 10-second model reload between questions. A timed activity indicator
+covers model loading and time-to-first-token, then output streams token by
+token; a compact token/rate/stop summary follows each turn. The default
+response limit is 128 tokens; `/max N` displays or
 changes it without restarting the models. For ctx1024, `N` may be 1–1023;
 the effective output also depends on prompt length. `/reset` marks a new
 transcript in an optional JSON report. The current REPL is independent-turn
 completion, not a chat-template conversation-history implementation.
+
+Colour and animation are enabled only on an interactive terminal. Redirected,
+piped and log output automatically remains stable plain text. Use
+`NO_COLOR=1 ./app/chat.sh` to disable colour, or pass `--no-spinner` to disable
+animation. `--color always|never|auto` and `PICO_MINICPM5_COLOR` explicitly
+select the colour policy.
 
 For a single non-interactive prompt:
 
@@ -74,6 +91,8 @@ these environment overrides:
 | `TOKENIZERS` | empty | Optional extra `site-packages` path |
 | `PROMPT` | unset | Optional one-shot prompt; unset starts REPL |
 | `MAX_NEW` | `128` | Initial maximum generated tokens |
+| `PICO_MINICPM5_COLOR` | `auto` | `auto`, `always` or `never` |
+| `NO_COLOR` | unset | Disable ANSI colour while in auto mode |
 
 Runtime libraries are detected first at `/root/pico_default_smoke/lib`, then
 at `/opt/ss928-runtime/lib`. Python is detected first at

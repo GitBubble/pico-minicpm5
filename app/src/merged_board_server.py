@@ -26,9 +26,11 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 from pathlib import Path
 import struct
 import sys
+import threading
 import time
 
 HERE = Path(__file__).resolve().parent
@@ -40,6 +42,119 @@ import probe_om_execute_latency as probe  # noqa: E402
 
 HIDDEN, KV_HEADS, HEAD_DIM, LAYERS = gc.HIDDEN, gc.KV_HEADS, gc.HEAD_DIM, gc.LAYERS
 CHANNELS = LAYERS * KV_HEADS
+
+
+class TerminalUI:
+    """Small dependency-free terminal UI for the resident board REPL.
+
+    Animation and ANSI colour are intentionally restricted to a real TTY.
+    Redirected output remains stable plain text for scripts and board logs.
+    """
+
+    _SPINNER = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+
+    def __init__(self, *, active, context, color="auto", spinner=True):
+        self.active = bool(active)
+        self.context = int(context)
+        self.is_tty = self.active and bool(getattr(sys.stdout, "isatty", lambda: False)())
+        env_color = os.environ.get("PICO_MINICPM5_COLOR")
+        if color == "auto" and env_color in {"auto", "always", "never"}:
+            color = env_color
+        self.color = (
+            color == "always"
+            or (color == "auto" and self.is_tty
+                and "NO_COLOR" not in os.environ
+                and os.environ.get("TERM") != "dumb")
+        )
+        self.animate = bool(spinner and self.is_tty)
+        self._wait_stop = threading.Event()
+        self._wait_thread = None
+        self._wait_label = ""
+        self._wait_started = 0.0
+
+    def paint(self, text, code):
+        if not self.color:
+            return text
+        return f"\033[{code}m{text}\033[0m"
+
+    def banner(self):
+        if not self.active:
+            return
+        lines = (
+            "        /\\_/\\",
+            "       ( o.o )    MiniCPM 5",
+            "        > ^ <     SS928 local AI",
+        )
+        shades = ("38;5;141", "1;38;5;45", "38;5;75")
+        print("", flush=True)
+        for line, shade in zip(lines, shades):
+            print(self.paint(line, shade), flush=True)
+        status = f"     ctx{self.context} · resident KV · streaming"
+        print(self.paint(status, "2;38;5;114"), flush=True)
+        print("", flush=True)
+
+    def start_wait(self, label):
+        if not self.active:
+            return
+        self.stop_wait()
+        self._wait_label = str(label)
+        self._wait_started = time.perf_counter()
+        if not self.animate:
+            print(self.paint(f"... {self._wait_label}", "2;38;5;75"), flush=True)
+            return
+        self._wait_stop.clear()
+        self._wait_thread = threading.Thread(
+            target=self._spin, name="minicpm-terminal-spinner", daemon=True)
+        self._wait_thread.start()
+
+    def _spin(self):
+        index = 0
+        while not self._wait_stop.is_set():
+            elapsed = time.perf_counter() - self._wait_started
+            frame = self.paint(self._SPINNER[index % len(self._SPINNER)],
+                               "1;38;5;45")
+            label = self.paint(self._wait_label, "38;5;75")
+            sys.stdout.write(f"\r\033[2K{frame} {label} {elapsed:4.1f}s")
+            sys.stdout.flush()
+            index += 1
+            self._wait_stop.wait(0.08)
+
+    def stop_wait(self):
+        thread = self._wait_thread
+        if thread is None:
+            return
+        self._wait_stop.set()
+        thread.join(timeout=1.0)
+        self._wait_thread = None
+        sys.stdout.write("\r\033[2K")
+        sys.stdout.flush()
+
+    def ready(self, handles, seconds):
+        mark = self.paint("✓", "1;38;5;114")
+        label = self.paint("ready", "1;38;5;45")
+        detail = self.paint(
+            f"{handles} handles · ctx{self.context} · {seconds:.1f}s",
+            "2;38;5;250")
+        print(f"{mark} {label} · loaded {detail}", flush=True)
+
+    def prompt(self):
+        return f"{self.paint('You', '1;38;5;141')} {self.paint('❯', '1;38;5;45')} "
+
+    def model_prefix(self):
+        brand = self.paint("MiniCPM", "1;38;5;45")
+        sparkle = self.paint("✦", "1;38;5;141")
+        print(f"{brand} {sparkle} ", end="", flush=True)
+
+    def info(self, text):
+        print(self.paint(text, "38;5;75"), flush=True)
+
+    def turn_summary(self, tokens, step_ms, reason):
+        if not self.is_tty:
+            return
+        total_s = sum(step_ms) / 1000.0
+        rate = tokens / total_s if total_s > 0 else 0.0
+        text = f"  {tokens} tokens · {rate:.2f} tok/s · {reason}"
+        print(self.paint(text, "2;38;5;244"), flush=True)
 
 
 class Merged:
@@ -357,6 +472,12 @@ def main() -> int:
         "--interactive", action="store_true",
         help="keep the three model handles loaded and read prompts from stdin")
     ap.add_argument("--max-new", type=int, default=128)
+    ap.add_argument(
+        "--color", choices=("auto", "always", "never"), default="auto",
+        help="terminal colour policy (default: auto; PICO_MINICPM5_COLOR also applies)")
+    ap.add_argument(
+        "--no-spinner", action="store_true",
+        help="disable the animated loading/thinking indicator")
     ap.add_argument("--report", type=Path)
     ap.add_argument("--start-position", type=int, default=0)
     ap.add_argument("--kv-in", type=Path)
@@ -379,16 +500,26 @@ def main() -> int:
     if not args.interactive and not args.prompt and not args.prompt_ids:
         ap.error("provide --prompt, --prompt-ids or --interactive")
 
+    ui = TerminalUI(active=args.interactive, context=args.context,
+                    color=args.color, spinner=not args.no_spinner)
+    ui.banner()
+    ui.start_wait("Loading three resident model handles")
     began = time.perf_counter()
-    session = Merged(executable=args.persistent_executor,
-                     decode=args.decode_model, prefill=args.prefill_model,
-                     head=args.head_model, library_paths=args.library_path,
-                     embedding=args.embedding, context=args.context,
-                     timeout=args.timeout, tokenizer=args.tokenizer,
-                     resident_kv=not args.host_kv)
+    try:
+        session = Merged(executable=args.persistent_executor,
+                         decode=args.decode_model, prefill=args.prefill_model,
+                         head=args.head_model, library_paths=args.library_path,
+                         embedding=args.embedding, context=args.context,
+                         timeout=args.timeout, tokenizer=args.tokenizer,
+                         resident_kv=not args.host_kv)
+    finally:
+        ui.stop_wait()
     load_ms = (time.perf_counter() - began) * 1000.0
-    print(f"loaded {len(session.models)} handles in {load_ms / 1000:.1f} s; "
-          f"kv slots {session.kv_slots}", flush=True)
+    if args.interactive:
+        ui.ready(len(session.models), load_ms / 1000.0)
+    else:
+        print(f"loaded {len(session.models)} handles in {load_ms / 1000:.1f} s; "
+              f"kv slots {session.kv_slots}", flush=True)
     results = []
 
     def run_text_prompt(spec, *, repl=False, repl_epoch=0, max_new=None,
@@ -431,13 +562,12 @@ def main() -> int:
                             "step_ms": steps,
                             "phase_ms": session.last_phase_steps})
         if args.interactive:
-            print("MiniCPM5 REPL ready. Commands: /help, /max N, /reset, /quit",
-                  flush=True)
+            ui.info("Commands: /help · /max N · /reset · /quit")
             epoch = 0
             repl_max_new = args.max_new
             while True:
                 try:
-                    spec = input("You> ").strip()
+                    spec = input(ui.prompt()).strip()
                 except EOFError:
                     print("", flush=True)
                     break
@@ -449,13 +579,14 @@ def main() -> int:
                 if spec in {"/quit", "/exit"}:
                     break
                 if spec == "/help":
-                    print("Each prompt starts a fresh logical context while "
-                          "the three model handles remain loaded. "
-                          f"Current max-new is {repl_max_new}; allowed range "
-                          f"is 1..{args.context - 1}. Effective output is also "
-                          "limited by prompt tokens. Use /max N to change it, "
-                          "/reset to mark a new transcript and /quit to exit.",
-                          flush=True)
+                    ui.info(
+                        "Each prompt starts a fresh logical context while "
+                        "the three model handles remain loaded. "
+                        f"Current context is ctx{args.context}; max-new is "
+                        f"{repl_max_new}; allowed range is "
+                        f"1..{args.context - 1}. Effective output is also "
+                        "limited by prompt tokens. Use /max N to change it, "
+                        "/reset to mark a new transcript and /quit to exit.")
                     continue
                 if spec == "/max":
                     print(f"max-new={repl_max_new}; allowed=1..{args.context - 1}; "
@@ -476,27 +607,41 @@ def main() -> int:
                     continue
                 if spec == "/reset":
                     epoch += 1
-                    print("Context reset.", flush=True)
+                    ui.info("Context reset.")
                     continue
                 shown = ""
+                prefix_shown = False
 
                 def stream(token_ids):
-                    nonlocal shown
+                    nonlocal shown, prefix_shown
+                    if not prefix_shown:
+                        ui.stop_wait()
+                        ui.model_prefix()
+                        prefix_shown = True
                     rendered = session.tokenizer.decode(
                         token_ids, skip_special_tokens=True)
                     if rendered.startswith(shown):
                         print(rendered[len(shown):], end="", flush=True)
                         shown = rendered
 
-                print("MiniCPM> ", end="", flush=True)
-                record, _gen = run_text_prompt(
-                    spec, repl=True, repl_epoch=epoch,
-                    max_new=repl_max_new, on_token=stream)
+                ui.start_wait("MiniCPM is thinking")
+                try:
+                    record, _gen = run_text_prompt(
+                        spec, repl=True, repl_epoch=epoch,
+                        max_new=repl_max_new, on_token=stream)
+                finally:
+                    ui.stop_wait()
                 results.append(record)
+                if not prefix_shown:
+                    ui.model_prefix()
+                    prefix_shown = True
                 if record["text"].startswith(shown):
                     print(record["text"][len(shown):], flush=True)
                 else:
-                    print(f"\nMiniCPM> {record['text']}", flush=True)
+                    print("", flush=True)
+                    ui.model_prefix()
+                    print(record["text"], flush=True)
+                ui.turn_summary(len(record["ids"]), _gen, record["reason"])
                 if record["reason"] == "max":
                     print(f"[reached max-new={repl_max_new}; "
                           "use /max N to increase it]", flush=True)

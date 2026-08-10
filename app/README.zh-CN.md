@@ -62,7 +62,8 @@ token。`/reset` 会在可选 JSON 报告中标记新的 transcript。当前是
 颜色和动画默认只在交互式终端开启；重定向、管道和日志输出自动保持为稳定的
 纯文本。可使用 `NO_COLOR=1 ./app/chat.sh` 关闭颜色，或添加
 `--no-spinner` 关闭动画。`--color always|never|auto` 和环境变量
-`PICO_MINICPM5_COLOR` 可显式控制颜色策略。
+`PICO_MINICPM5_COLOR` 可显式控制颜色策略。REPL 默认隐藏 executor 的底层加载
+日志，调试时可添加 `--verbose-executor` 恢复显示。
 
 单次非交互执行：
 

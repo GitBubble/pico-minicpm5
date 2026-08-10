@@ -66,7 +66,8 @@ Colour and animation are enabled only on an interactive terminal. Redirected,
 piped and log output automatically remains stable plain text. Use
 `NO_COLOR=1 ./app/chat.sh` to disable colour, or pass `--no-spinner` to disable
 animation. `--color always|never|auto` and `PICO_MINICPM5_COLOR` explicitly
-select the colour policy.
+select the colour policy. The REPL hides low-level executor loading logs by
+default; pass `--verbose-executor` when debugging them.
 
 For a single non-interactive prompt:
 

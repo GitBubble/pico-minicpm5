@@ -160,7 +160,7 @@ class TerminalUI:
 class Merged:
     def __init__(self, *, executable, decode, prefill, head, library_paths,
                  embedding, context, timeout, tokenizer=None,
-                 resident_kv=True):
+                 resident_kv=True, quiet_executor=False):
         self.context = context
         self.past = context - 1
         self.timeout = timeout
@@ -182,7 +182,8 @@ class Merged:
         self.decode_index = 0
         self.prefill_index = 1 if prefill else 0
         self.head_index = len(self.models) - 1
-        self.process = probe._start(executable, self.models, library_paths, 0)
+        self.process = probe._start(
+            executable, self.models, library_paths, 0, quiet=quiet_executor)
         self._deadline = time.monotonic() + timeout
         self.descriptors = probe._read_ready(
             self.process.stdout, len(self.models), self._deadline)
@@ -478,6 +479,9 @@ def main() -> int:
     ap.add_argument(
         "--no-spinner", action="store_true",
         help="disable the animated loading/thinking indicator")
+    ap.add_argument(
+        "--verbose-executor", action="store_true",
+        help="show low-level executor startup diagnostics in interactive mode")
     ap.add_argument("--report", type=Path)
     ap.add_argument("--start-position", type=int, default=0)
     ap.add_argument("--kv-in", type=Path)
@@ -511,7 +515,9 @@ def main() -> int:
                          head=args.head_model, library_paths=args.library_path,
                          embedding=args.embedding, context=args.context,
                          timeout=args.timeout, tokenizer=args.tokenizer,
-                         resident_kv=not args.host_kv)
+                         resident_kv=not args.host_kv,
+                         quiet_executor=args.interactive
+                         and not args.verbose_executor)
     finally:
         ui.stop_wait()
     load_ms = (time.perf_counter() - began) * 1000.0

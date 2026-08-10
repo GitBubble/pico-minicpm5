@@ -26,7 +26,7 @@ import pico_minicpm5_split_board_runner as runner  # noqa: E402
 
 
 def _start(executable: Path, models: Sequence[Path], library_paths: Sequence[Path],
-           device: int) -> subprocess.Popen:
+           device: int, *, quiet: bool = False) -> subprocess.Popen:
     command = [str(executable), "--device", str(device)]
     for model in models:
         command.extend(("--model", str(model)))
@@ -37,7 +37,7 @@ def _start(executable: Path, models: Sequence[Path], library_paths: Sequence[Pat
         value for value in (configured, inherited) if value)
     return subprocess.Popen(
         command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-        stderr=None, env=environment)
+        stderr=subprocess.DEVNULL if quiet else None, env=environment)
 
 
 def _read_ready(stream, model_count: int, deadline: float):

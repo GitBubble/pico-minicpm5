@@ -96,6 +96,22 @@ def test_terminal_ui_color_can_be_forced(monkeypatch, capsys) -> None:
     assert "loaded" in output
 
 
+def test_interactive_executor_can_hide_low_level_stderr(monkeypatch) -> None:
+    server = _server_module()
+    captured = []
+
+    def fake_popen(command, **kwargs):
+        captured.append((command, kwargs))
+        return SimpleNamespace()
+
+    monkeypatch.setattr(server.probe.subprocess, "Popen", fake_popen)
+    server.probe._start(
+        Path("executor"), [Path("decode.om")], [Path("lib")], 0,
+        quiet=True)
+
+    assert captured[0][1]["stderr"] is subprocess.DEVNULL
+
+
 def _fake_python(tmp_path: Path) -> Path:
     fake = tmp_path / "python"
     fake.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n", encoding="utf-8")

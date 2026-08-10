@@ -98,8 +98,9 @@ cd /opt/pico-minicpm5
 ./app/chat.sh
 ```
 
-This starts a resident REPL with `/help`, `/reset` and `/quit`. For a one-shot
-run use `./app/chat.sh --prompt 'The capital of France is' --max-new 16`.
+This starts a streaming resident REPL with `/help`, `/max N`, `/reset` and
+`/quit`; the initial response limit is 128 tokens. For a one-shot run use
+`./app/chat.sh --prompt 'The capital of France is' --max-new 16`.
 
 ## Quick start
 

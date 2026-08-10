@@ -210,7 +210,7 @@ class Merged:
     # -- decode ----------------------------------------------------------
     def generate(self, prompt_ids, max_new, eos, *, start=0,
                  kv_in=None, kv_out=None, stop_after=None,
-                 capture_dir=None, capture_position=None):
+                 capture_dir=None, capture_position=None, on_token=None):
         self.last_phase_steps = []
         host_kv = not self.resident_kv or kv_in is not None or kv_out is not None
         k_cache = bytearray(self.cache_bytes) if host_kv else None
@@ -312,6 +312,8 @@ class Merged:
                 continue
             produced_ids.append(int(predicted))
             produced += 1
+            if on_token is not None:
+                on_token(tuple(produced_ids))
             if int(predicted) in eos:
                 return "eos", produced_ids, steps
             if produced >= max_new:
@@ -354,7 +356,7 @@ def main() -> int:
     ap.add_argument(
         "--interactive", action="store_true",
         help="keep the three model handles loaded and read prompts from stdin")
-    ap.add_argument("--max-new", type=int, default=16)
+    ap.add_argument("--max-new", type=int, default=128)
     ap.add_argument("--report", type=Path)
     ap.add_argument("--start-position", type=int, default=0)
     ap.add_argument("--kv-in", type=Path)
@@ -389,20 +391,23 @@ def main() -> int:
           f"kv slots {session.kv_slots}", flush=True)
     results = []
 
-    def run_text_prompt(spec, *, repl=False, repl_epoch=0):
+    def run_text_prompt(spec, *, repl=False, repl_epoch=0, max_new=None,
+                        on_token=None):
+        limit = args.max_new if max_new is None else int(max_new)
         ids = [0] + list(session.tokenizer.encode(
             spec, add_special_tokens=False).ids)
         reason, out, steps = session.generate(
-            ids, args.max_new, {1, 130073}, start=args.start_position,
+            ids, limit, {1, 130073}, start=args.start_position,
             kv_in=args.kv_in, kv_out=args.kv_out,
             stop_after=args.stop_after, capture_dir=args.capture_dir,
-            capture_position=args.capture_position)
+            capture_position=args.capture_position, on_token=on_token)
         text = session.tokenizer.decode(out, skip_special_tokens=True)
         record = {"prompt": spec, "ids": out, "text": text,
                   "reason": reason, "step_ms": steps,
                   "phase_ms": session.last_phase_steps}
         if repl:
-            record.update(mode="repl", repl_epoch=repl_epoch)
+            record.update(mode="repl", repl_epoch=repl_epoch,
+                          max_new=limit)
         return record, steps[len(ids) - 1:]
 
     try:
@@ -426,9 +431,10 @@ def main() -> int:
                             "step_ms": steps,
                             "phase_ms": session.last_phase_steps})
         if args.interactive:
-            print("MiniCPM5 REPL ready. Commands: /help, /reset, /quit",
+            print("MiniCPM5 REPL ready. Commands: /help, /max N, /reset, /quit",
                   flush=True)
             epoch = 0
+            repl_max_new = args.max_new
             while True:
                 try:
                     spec = input("You> ").strip()
@@ -445,17 +451,54 @@ def main() -> int:
                 if spec == "/help":
                     print("Each prompt starts a fresh logical context while "
                           "the three model handles remain loaded. "
-                          "Use /reset to mark a new transcript and /quit to exit.",
+                          f"Current max-new is {repl_max_new}. Use /max N to "
+                          "change it, /reset to mark a new transcript and "
+                          "/quit to exit.",
                           flush=True)
+                    continue
+                if spec == "/max":
+                    print(f"max-new={repl_max_new}", flush=True)
+                    continue
+                if spec.startswith("/max "):
+                    try:
+                        requested = int(spec.split(None, 1)[1])
+                    except ValueError:
+                        print("Usage: /max N", flush=True)
+                        continue
+                    if requested < 1 or requested >= args.context:
+                        print(f"N must be in [1, {args.context - 1}]", flush=True)
+                        continue
+                    repl_max_new = requested
+                    print(f"max-new={repl_max_new}", flush=True)
                     continue
                 if spec == "/reset":
                     epoch += 1
                     print("Context reset.", flush=True)
                     continue
+                shown = ""
+
+                def stream(token_ids):
+                    nonlocal shown
+                    rendered = session.tokenizer.decode(
+                        token_ids, skip_special_tokens=True)
+                    if rendered.startswith(shown):
+                        print(rendered[len(shown):], end="", flush=True)
+                        shown = rendered
+
+                print("MiniCPM> ", end="", flush=True)
                 record, _gen = run_text_prompt(
-                    spec, repl=True, repl_epoch=epoch)
+                    spec, repl=True, repl_epoch=epoch,
+                    max_new=repl_max_new, on_token=stream)
                 results.append(record)
-                print(f"MiniCPM> {record['text']}", flush=True)
+                if record["text"].startswith(shown):
+                    print(record["text"][len(shown):], flush=True)
+                else:
+                    print(f"\nMiniCPM> {record['text']}", flush=True)
+                if record["reason"] == "max":
+                    print(f"[reached max-new={repl_max_new}; "
+                          "use /max N to increase it]", flush=True)
+                elif record["reason"] == "context":
+                    print(f"[reached ctx{args.context} limit]", flush=True)
     finally:
         session.close()
     if args.report:

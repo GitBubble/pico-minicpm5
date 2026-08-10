@@ -23,3 +23,5 @@ Makefile、二进制和 `chat.sh` 的独立重复 Asset。
 runtime 新增常驻 stdin REPL。无参数运行 `app/chat.sh` 只加载一次三个
 模型句柄，随后可连续输入 prompt；内置 `/help`、`/reset` 和 `/quit`。
 原有单次 `--prompt` 用法保持兼容。
+REPL 回答现在会随 token 生成逐步显示，默认上限为 128 token，并支持
+`/max N`。达到回答或 ctx 上限时会显式提示，不再静默截断。

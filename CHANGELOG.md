@@ -16,6 +16,8 @@
   longer duplicated as standalone assets.
 - Added a resident stdin REPL (`/help`, `/reset`, `/quit`) so repeated prompts
   reuse the three loaded handles; no-argument `app/chat.sh` enters it directly.
+- Streamed REPL output token-by-token, raised the initial response limit from
+  32 to 128 tokens and added `/max N` with explicit limit diagnostics.
 
 - Initial open-source pipeline from pinned MiniCPM5-1B checkpoint to real-weight
   layer ONNX, packed 24-layer prefill/decode ONNX, external ATC compilation and

@@ -13,6 +13,8 @@
   一致、EOS 和中文路径通过。
 - 新增常驻 stdin REPL（`/help`、`/reset`、`/quit`），多次输入复用
   三个已加载句柄；无参数执行 `app/chat.sh` 直接进入 REPL。
+- REPL 改为逐 token 流式显示，初始回答上限从 32 提升到 128 token，
+  新增 `/max N` 动态调整和明确的上限提示。
 - executor 源码、Makefile 与 demo 不再作为独立 Asset 重复发布。
 
 - 首次开源从固定 MiniCPM5-1B checkpoint 到真实权重单层 ONNX、24 层打包

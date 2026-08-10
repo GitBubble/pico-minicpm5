@@ -49,12 +49,14 @@ def test_repl_reuses_one_session_and_handles_commands(monkeypatch, capsys) -> No
         def generate(self, ids, *_args, **_kwargs):
             calls.append(ids)
             self.last_phase_steps = [{"position": 0}]
+            if _kwargs.get("on_token") is not None:
+                _kwargs["on_token"]((100 + len(calls),))
             return "max", [100 + len(calls)], [1.0, 2.0]
 
         def close(self):
             self.closed = True
 
-    prompts = iter(["hello", "/reset", "world", "/help", "/quit"])
+    prompts = iter(["hello", "/reset", "/max 64", "world", "/help", "/quit"])
     monkeypatch.setattr(server, "Merged", Session)
     monkeypatch.setattr(builtins, "input", lambda _prompt: next(prompts))
     monkeypatch.setattr(sys, "argv", [
@@ -71,7 +73,8 @@ def test_repl_reuses_one_session_and_handles_commands(monkeypatch, capsys) -> No
     assert output.count("loaded 3 handles") == 1
     assert "MiniCPM> reply-101" in output
     assert "Context reset." in output
-    assert "Commands: /help, /reset, /quit" in output
+    assert "Commands: /help, /max N, /reset, /quit" in output
+    assert "max-new=64" in output
 
 
 def _fake_python(tmp_path: Path) -> Path:

@@ -31,4 +31,6 @@ standalone executor source/binary/Makefile assets are retired.
 The runtime now also exposes a resident stdin REPL. Running `app/chat.sh`
 without arguments loads the three handles once and accepts repeated prompts;
 `/help`, `/reset` and `/quit` are built in. One-shot `--prompt` execution stays
-compatible.
+compatible. REPL responses now stream as tokens are generated, default to a
+128-token limit and support `/max N`; reaching the response or context limit
+is reported explicitly instead of silently truncating text.

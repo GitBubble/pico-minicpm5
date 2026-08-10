@@ -36,7 +36,7 @@ chmod +x app/chat.sh app/bin/pico_persistent_acl_executor.aarch64
 ```
 
 ```text
-MiniCPM5 REPL ready. Commands: /help, /reset, /quit
+MiniCPM5 REPL ready. Commands: /help, /max N, /reset, /quit
 You> The capital of France is
 MiniCPM>  Paris, ...
 You> /quit
@@ -44,7 +44,10 @@ You> /quit
 
 Each REPL prompt starts a fresh logical ctx1024 sequence; the model handles,
 executor process and allocated device buffers stay resident. This avoids the
-roughly 10-second model reload between questions. `/reset` marks a new
+roughly 10-second model reload between questions. Output is streamed as tokens
+are generated. The default response limit is 128 tokens; `/max N` displays or
+changes it without restarting the models. For ctx1024, `N` may be 1–1023;
+the effective output also depends on prompt length. `/reset` marks a new
 transcript in an optional JSON report. The current REPL is independent-turn
 completion, not a chat-template conversation-history implementation.
 
@@ -70,7 +73,7 @@ these environment overrides:
 | `PYTHON` | auto-detect | Python executable |
 | `TOKENIZERS` | empty | Optional extra `site-packages` path |
 | `PROMPT` | unset | Optional one-shot prompt; unset starts REPL |
-| `MAX_NEW` | `24` | Maximum generated tokens |
+| `MAX_NEW` | `128` | Initial maximum generated tokens |
 
 Runtime libraries are detected first at `/root/pico_default_smoke/lib`, then
 at `/opt/ss928-runtime/lib`. Python is detected first at

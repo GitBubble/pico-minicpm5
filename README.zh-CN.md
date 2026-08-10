@@ -41,7 +41,8 @@ cd /opt/pico-minicpm5
 ./app/chat.sh
 ```
 
-该命令会进入三句柄常驻 REPL，支持 `/help`、`/reset` 和 `/quit`。
+该命令会进入三句柄常驻流式 REPL，支持 `/help`、`/max N`、`/reset`
+和 `/quit`，初始回答上限为 128 token。
 单次运行可使用 `./app/chat.sh --prompt '请用一句话解释什么是神经网络。' --max-new 32`。
 
 从 Release 下载和整理文件：

@@ -20,7 +20,7 @@ else
   PYTHON_BIN=python3
 fi
 TOKENIZERS=${TOKENIZERS:-}
-MAX_NEW=${MAX_NEW:-24}
+MAX_NEW=${MAX_NEW:-128}
 
 # With no arguments and no PROMPT override, start a resident REPL. Explicit
 # CLI arguments are forwarded unchanged so `chat.sh --prompt ...` does not also

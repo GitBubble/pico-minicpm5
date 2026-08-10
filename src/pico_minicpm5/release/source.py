@@ -23,9 +23,11 @@ DENIED_PARTS = {
 ALLOWED_ROOT_FILES = {
     ".gitignore", "CHANGELOG.md", "CITATION.cff", "CONTRIBUTING.md", "LICENSE",
     "MANIFEST.in", "Makefile", "MODEL_PROVENANCE.md", "NOTICE", "README.md",
-    "SECURITY.md", "THIRD_PARTY_NOTICES.md", "pyproject.toml",
+    "README.zh-CN.md", "SECURITY.md", "THIRD_PARTY_NOTICES.md", "pyproject.toml",
 }
-ALLOWED_TOP_LEVEL = {".github", "configs", "docs", "experimental", "release", "schemas", "src", "tests"}
+ALLOWED_TOP_LEVEL = {
+    ".github", "app", "configs", "docs", "experimental", "release", "schemas", "src", "tests"
+}
 # Keep markers split in this module so the denylist does not reject its own
 # source while still matching the joined private strings in candidate files.
 TEXT_DENYLIST = (
@@ -41,6 +43,10 @@ def source_files(project_root: Path) -> list[Path]:
     files = []
     for path in project_root.rglob("*"):
         relative = path.relative_to(project_root)
+        # A published checksum list contains the SBOM digest. Including that
+        # list in the SBOM input would create a self-referential release cycle.
+        if relative.parts[:1] == ("release",) and path.name == "SHA256SUMS":
+            continue
         if (
             any(part in DENIED_PARTS or part.endswith(".egg-info") for part in relative.parts)
         ):

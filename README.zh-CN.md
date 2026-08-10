@@ -25,7 +25,8 @@ Hugging Face checkpoint
 - decode 公开输出最低 cosine：`0.998023`；
 - 生成 token 与官方 checkpoint 的 FP64 oracle 对比为 `48/48`；
 - EOS 与中文生成路径通过；
-- `8.20–8.60 token/s`，约为已验收 49 句柄基线的 `1.67x`。
+- 优化后 resident-K/V runtime 达到 `9.42–9.48 token/s`，
+  即 `105.5–106.1 ms/token`，约为已验收 49 句柄基线的 `1.91x`。
 
 这些数字只对应已记录的 SS928 配置和三个冻结 OM 哈希，不代表所有 Hi3403 产品
 配置。本 Release 的上下文合同固定为 1024。
@@ -36,7 +37,7 @@ Hugging Face checkpoint
 已经放到板端后，只需：
 
 ```bash
-cd /root/minicpm5_gate_3handle
+cd /opt/pico-minicpm5
 PROMPT='请用一句话解释什么是神经网络。' MAX_NEW=32 sh app/chat.sh
 ```
 
@@ -60,12 +61,13 @@ sha256sum -c SHA256SUMS
 
 ```bash
 tar cf - . | ssh root@BOARD_IP \
-  'mkdir -p /root/minicpm5_gate_3handle && tar xf - -C /root/minicpm5_gate_3handle'
+  'mkdir -p /opt/pico-minicpm5 && tar xf - -C /opt/pico-minicpm5'
 ```
 
 板端运行库默认位于 `/root/pico_default_smoke/lib`，这些 SDK 动态库不会在开源
-项目中重新分发。runtime 包提供 AArch64 executor 二进制，并在 `native/` 中同时
-提供其 C++ 源码和 Makefile。
+项目中重新分发。runtime 包在 `app/bin/` 提供 AArch64 executor 二进制，
+并将其 C 源码和 Makefile 统一归档在 `app/native/`。这些文件不再作为
+独立 Release Asset 重复发布。
 
 ## 从源码构建
 

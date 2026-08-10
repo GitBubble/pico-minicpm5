@@ -1,6 +1,6 @@
 {
   "schema": "pico.minicpm5.merged3handle.qualification.v1",
-  "date": "2026-08-09",
+  "date": "2026-08-10",
   "board": "SS928 (board address intentionally omitted)",
   "cosine_threshold_exclusive": 0.98,
   "artifacts": {
@@ -83,8 +83,8 @@
           5608,
           5087
         ],
-        "median_generated_ms": 122.021,
-        "tokens_per_second": 8.195
+        "median_generated_ms": 106.11435399914626,
+        "tokens_per_second": 9.423795766669281
       },
       {
         "prompt": "1, 2, 3, 4,",
@@ -108,8 +108,8 @@
           33,
           242
         ],
-        "median_generated_ms": 116.344,
-        "tokens_per_second": 8.595
+        "median_generated_ms": 105.57204149881727,
+        "tokens_per_second": 9.472204816757314
       },
       {
         "prompt": "def add(a, b):",
@@ -133,8 +133,8 @@
           223,
           220
         ],
-        "median_generated_ms": 116.536,
-        "tokens_per_second": 8.581
+        "median_generated_ms": 105.53341650302173,
+        "tokens_per_second": 9.475671622659606
       }
     ],
     "eos_probe": {
@@ -155,21 +155,31 @@
       "text": " 2\nThe answer is 2"
     },
     "report_sha256": {
-      "e2e_oracle3.json": "eaa485388013efad52485bcd379e3eac133022cc9d5a03a04ce29dd008abd639",
-      "e2e_chat2.json": "b7dcfdd7783080c9fb6618ee40f3e21e18a27786184820bb63246157c2f258b5"
+      "fast_prepare_oracle3.json": "1051be8e59f2b538f0fa5e11fe8a8e3bfa4ac3be19702758bea5602bef49be3a",
+      "fast_prepare_eos_zh.json": "f57a77e99bd172557961f3d9e5ee9b9b2b5393b268366c865f55cbf464268032",
+      "fast_prepare_phases.json": "7c5566c37d0b6a0319c48cab65a958303a2dd4229dbc704c7ebaa49c0a946715"
     }
   },
   "performance": {
     "merged_tokens_per_second_range": [
-      8.195,
-      8.595
+      9.423795766669281,
+      9.475671622659606
     ],
     "accepted_49handle_tokens_per_second_range": [
       4.89,
       4.92
     ],
-    "conservative_throughput_speedup": 1.67,
-    "approximate_token_latency_reduction_percent": 40
+    "conservative_throughput_speedup": 1.91,
+    "approximate_token_latency_reduction_percent": 48,
+    "phase_median_ms": {
+      "prepare": 1.3072919973637909,
+      "transformer": 82.66466650093207,
+      "kv_scatter": 0.36749950231751427,
+      "head_execute": 20.371353999507846,
+      "argmax": 0.9376044981763698,
+      "total": 105.66195899809827
+    },
+    "same_run_host_kv_throughput_gain_percent_range": [10.335, 11.041]
   },
   "known_nonblocking": {
     "prefill_layer2_v_slice_cosine": 0.9711191219194694,

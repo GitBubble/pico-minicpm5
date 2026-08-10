@@ -18,6 +18,7 @@ from .pipeline import build_three_handle
 from .qualification import build_qualification
 from .reference import DEFAULT_PROMPT_TOKENS, capture_reference
 from .release.bundle import assemble_bundle, verify_bundle
+from .release.runtime import create_runtime_archive
 from .release.source import create_source_archive
 from .release.sbom import generate_spdx
 from .score import (
@@ -134,6 +135,10 @@ def _release_commands(subparsers) -> None:
     source.add_argument("--project-root", type=Path)
     source.add_argument("--out", type=Path, default=PROJECT_ROOT / "artifacts")
     source.add_argument("--check-only", action="store_true")
+    runtime = commands.add_parser("runtime")
+    runtime.add_argument("--project-root", type=Path)
+    runtime.add_argument("--executor", type=Path, required=True)
+    runtime.add_argument("--out", type=Path, default=PROJECT_ROOT / "artifacts")
     sbom = commands.add_parser("sbom")
     sbom.add_argument("--project-root", type=Path)
     sbom.add_argument("--out", type=Path, required=True)
@@ -373,6 +378,14 @@ def main(argv=None) -> int:
                 )
             _emit(create_source_archive(project_root=project_root, output_dir=args.out,
                                         check_only=args.check_only))
+        elif args.release_command == "runtime":
+            project_root = args.project_root or PROJECT_ROOT
+            if not (project_root / "pyproject.toml").is_file():
+                raise SystemExit(
+                    "release runtime must run from a source checkout or receive --project-root"
+                )
+            _emit(create_runtime_archive(
+                project_root=project_root, executor=args.executor, output_dir=args.out))
         else:
             project_root = args.project_root or PROJECT_ROOT
             if not (project_root / "pyproject.toml").is_file():

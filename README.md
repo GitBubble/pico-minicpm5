@@ -35,7 +35,9 @@ The frozen `ctx1024` three-handle candidate was accepted on an SS928 board:
 - decode minimum public-output cosine: `0.998023`;
 - `48/48` greedy tokens matched the official-checkpoint FP64 oracle;
 - EOS and Chinese text paths passed;
-- `8.20–8.60 token/s`, approximately `1.67x` the accepted 49-handle baseline.
+- optimized resident-K/V runtime: `9.42–9.48 token/s` at
+  `105.5–106.1 ms/token`, approximately `1.91x` the accepted 49-handle
+  baseline.
 
 These are SS928 measurements. They are not a claim that every Hi3403 product
 configuration has been qualified. The upstream checkpoint advertises a much
@@ -46,9 +48,11 @@ longer context; this release contract is intentionally fixed at `1024`.
 Release [`v0.1.0`](https://github.com/GitBubble/pico-minicpm5/releases/tag/v0.1.0)
 contains the accepted three-handle deployment: `prefill.om`, `decode.om`,
 `head_flat.om`, the token embedding and tokenizer, plus a small runtime archive
-with `chat.sh`, the board server, the resident AArch64 executor and its C++
-source/Makefile. The three OM files correspond to position-0 prefill, recurrent
-decode and the vocabulary projection head respectively.
+with the complete `app/` board application and resident AArch64 executor. The
+executor C source and Makefile are archived under `app/native/` in both this
+repository and the runtime archive; they are not duplicate standalone Release
+assets. The three OM files correspond to position-0 prefill, recurrent decode
+and the vocabulary projection head respectively.
 
 Download and arrange the files on the host:
 
@@ -72,26 +76,25 @@ Copy the assembled directory to the board and start the demo:
 
 ```bash
 tar cf - . | ssh root@BOARD_IP \
-  'mkdir -p /root/minicpm5_gate_3handle && tar xf - -C /root/minicpm5_gate_3handle'
+  'mkdir -p /opt/pico-minicpm5 && tar xf - -C /opt/pico-minicpm5'
 
 ssh root@BOARD_IP \
-  'GATE=/root/minicpm5_gate_3handle PROMPT="The capital of France is" MAX_NEW=16 sh /root/minicpm5_gate_3handle/chat.sh'
+  'PICO_MINICPM5_ROOT=/opt/pico-minicpm5 PICO_RUNTIME_LIB=/root/pico_default_smoke/lib PROMPT="The capital of France is" MAX_NEW=16 sh /opt/pico-minicpm5/app/chat.sh'
 ```
 
 The accepted board image provides the licensed runtime libraries under
 `/root/pico_default_smoke/lib`; they are intentionally not redistributed in
 this repository or release. Override `TOKENIZERS` if the board's `tokenizers`
-Python package is installed somewhere other than the path used by `chat.sh`.
-The runtime archive also contains `native/pico_persistent_acl_executor.c` and
-`.mk` so the executor can be rebuilt with the SS928 cross-toolchain instead of
-using the supplied AArch64 binary.
+Python package is installed outside the normal Python environment. The runtime
+archive keeps the compiled executor in `app/bin/` and its rebuildable source
+and Makefile in `app/native/`.
 
 If the release files are already present on the board, skip all host-side
 steps and follow [`app/README.md`](app/README.md). The shortest board command
 is:
 
 ```bash
-cd /root/minicpm5_gate_3handle
+cd /opt/pico-minicpm5
 PROMPT='请用一句话解释什么是神经网络。' MAX_NEW=32 sh app/chat.sh
 ```
 

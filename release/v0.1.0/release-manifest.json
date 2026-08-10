@@ -56,7 +56,7 @@
     "decode_minimum_public_output": 0.9980232292994137,
     "greedy_tokens_exact": 48,
     "greedy_tokens_total": 48,
-    "tokens_per_second_range": [8.195, 8.595],
+    "tokens_per_second_range": [9.423795766669281, 9.475671622659606],
     "eos": "PASS",
     "overall": "PASS"
   },
@@ -64,11 +64,22 @@
     "prefill_layer2_v_slice_cosine": 0.9711191219194694,
     "blocking_under_public_output_gate": false
   },
+  "runtime": {
+    "application": "app/",
+    "executor_binary": {
+      "bytes": 29400,
+      "sha256": "b58b5c2715154f8f7051d2d8fd111af41bb3cd318dbd3be86a60a0ac9a842230",
+      "distribution": "runtime-archive-only"
+    },
+    "board_runner_sha256": "01c8d4e777301be0b1d4be94f8970c7ca125f343028756854e1d80b39ff68ea9",
+    "resident_kv": true,
+    "tokens_per_second_range": [9.423795766669281, 9.475671622659606]
+  },
   "excluded_external_components": [
     "checkpoint weights",
     "ATC and DDK",
     "libinstsim",
     "custom-op shared libraries",
-    "board runtime libraries and executor binaries"
+    "proprietary board runtime libraries"
   ]
 }

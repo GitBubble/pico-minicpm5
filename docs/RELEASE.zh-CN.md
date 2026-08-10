@@ -14,6 +14,26 @@ pico-minicpm5 release sbom --out artifacts/pico-minicpm5-0.1.0.spdx.json
 image list、异常大文件、开发机绝对路径和板端地址。公开源码产物保留标准 sdist、
 wheel、SBOM 与 checksum；GitHub 自动提供 tag 的 source code 归档。
 
+## 板端 runtime 归档
+
+executor 源码与 Makefile 统一维护在 `app/native/`，板端 Python 源码与
+直接运行 demo 分别放在 `app/src/` 和 `app/chat.sh`。使用已验收的
+AArch64 executor 生成唯一 runtime asset：
+
+```bash
+make -C app/native \
+  SDK_ROOT=/path/to/SS928/sdk/smp/a55_linux/mpp/out \
+  CC=aarch64-mix210-linux-gcc
+pico-minicpm5 release runtime \
+  --executor app/bin/pico_persistent_acl_executor.aarch64 \
+  --out artifacts
+```
+
+打包器会校验 AArch64 ELF、文件大小和 v0.1.0 manifest 中的固定 SHA256。
+runtime 包只保留一棵规范的 `app/` 目录，并自带 `SHA256SUMS`。
+executor C 源码、Makefile、二进制和 `chat.sh` 不再作为独立 Release
+Asset 重复上传；预编译 executor 只存在于 runtime 包的 `app/bin/`。
+
 ## 模型派生 Release
 
 ```bash
@@ -28,6 +48,6 @@ prefill、decode、head 三份独立评分，并绑定准确 OM、同一个 ATC 
 和对应 runtime capture。全流程固定 ctx1024。
 
 模型 bundle 包含三只 OM、FP16 embedding、tokenizer 与 manifest；板端 runtime
-补充包包含 `app/chat.sh`、Python server、AArch64 executor 及其 C++/Makefile。厂商
+补充包包含完整 `app/` 目录和已验收 AArch64 executor。厂商
 ATC/DDK、动态库和 custom-op `.so` 始终由用户提供。发布前还需确认模型许可证
 以及本地工具链对派生产物的分发条款。

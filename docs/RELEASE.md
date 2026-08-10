@@ -23,6 +23,27 @@ the repository root. Re-running the step therefore cannot checksum the old
 checksum list or create a self-referential entry. No proprietary or
 model-derived payload is needed to run CI.
 
+## Board runtime archive
+
+The executor source and Makefile are maintained in `app/native/`; board Python
+sources and the direct demo are maintained in `app/src/` and `app/chat.sh`.
+Build the qualified AArch64 executor, then assemble the single runtime asset:
+
+```bash
+make -C app/native \
+  SDK_ROOT=/path/to/SS928/sdk/smp/a55_linux/mpp/out \
+  CC=aarch64-mix210-linux-gcc
+pico-minicpm5 release runtime \
+  --executor app/bin/pico_persistent_acl_executor.aarch64 \
+  --out artifacts
+```
+
+The packager verifies the AArch64 ELF, size and frozen SHA256 from the v0.1.0
+manifest. The archive has one canonical `app/` tree and embeds its own
+`SHA256SUMS`. Executor C, Makefile, binary and `chat.sh` are not uploaded as
+duplicate standalone Release assets; the compiled binary exists only inside
+the runtime archive.
+
 ## Local derived-model release
 
 ```bash
@@ -41,8 +62,9 @@ its libinstsim or SS928 run. Capture records are local hash-based audit
 evidence, not cryptographic execution proofs or remote attestation. The full
 build/capture/score/qualification contract is fixed at ctx1024. The bundle
 contains three OM files, the derived FP16 embedding, tokenizer and manifests.
-It deliberately excludes ATC/DDK, runtime libraries, custom-op `.so` files and
-prebuilt board executors.
+It deliberately excludes ATC/DDK, runtime libraries and custom-op `.so` files.
+The separately assembled runtime archive carries the open application and its
+qualified prebuilt executor, but no proprietary runtime libraries.
 
 Before publishing a derived-model bundle, confirm both the pinned model license
 and the redistribution terms for outputs produced by the locally installed

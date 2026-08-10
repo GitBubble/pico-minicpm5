@@ -15,3 +15,15 @@ only after every hash and policy check passes.
 
 The default compiler route is graph-level 24-layer composition followed by one
 ATC invocation per family. Binary OM post-linking is not a production path.
+
+## Runtime refresh — 2026-08-10
+
+The three qualified OM files remain byte-identical. The board application now
+keeps packed K/V resident, scatters current FP32 rows directly to FP16 cache,
+packs C4 embeddings directly and prepares RoPE sparsely. SS928 throughput rises
+from the original `8.20–8.60 token/s` range to `9.42–9.48 token/s` while keeping
+48/48 greedy tokens exact and preserving EOS and Chinese prompt results.
+
+Board application source, executor C and its Makefile now live under `app/`.
+The compiled executor is carried only by the runtime archive; duplicate
+standalone executor source/binary/Makefile assets are retired.

@@ -482,7 +482,10 @@ def main() -> int:
     ap.add_argument("--prompt-ids", action="append", default=[])
     ap.add_argument(
         "--interactive", action="store_true",
-        help="keep the three model handles loaded and read prompts from stdin")
+        help="legacy raw-completion REPL")
+    ap.add_argument(
+        "--chat", action="store_true",
+        help="run the official MiniCPM5 no-tools chat REPL")
     ap.add_argument(
         "--agent", action="store_true",
         help="run the native MiniCPM5 chat/tool-calling agent REPL")
@@ -514,24 +517,25 @@ def main() -> int:
         ap.error("--capture-dir and --capture-position must be provided together")
     if args.capture_position is not None and args.capture_position < 0:
         ap.error("--capture-position must be nonnegative")
-    if args.interactive and args.agent:
-        ap.error("--interactive and --agent are mutually exclusive")
-    if (args.interactive or args.agent) and args.tokenizer is None:
-        ap.error("--interactive/--agent requires --tokenizer")
-    if (args.interactive or args.agent) and (
+    if sum((args.interactive, args.chat, args.agent)) > 1:
+        ap.error("--interactive, --chat and --agent are mutually exclusive")
+    if (args.interactive or args.chat or args.agent) and args.tokenizer is None:
+        ap.error("--interactive/--chat/--agent requires --tokenizer")
+    if (args.interactive or args.chat or args.agent) and (
             args.prompt_ids or args.start_position != 0 or args.kv_in is not None
             or args.kv_out is not None or args.stop_after is not None
             or args.capture_dir is not None):
-        ap.error("--interactive/--agent is incompatible with prompt-id/KV/capture controls")
-    if args.agent and args.prompt:
-        ap.error("--agent is an interactive REPL; omit --prompt")
+        ap.error("REPL modes are incompatible with prompt-id/KV/capture controls")
+    if (args.chat or args.agent) and args.prompt:
+        ap.error("--chat/--agent are interactive REPLs; omit --prompt")
     if args.max_tool_steps < 1 or args.max_tool_steps > 16:
         ap.error("--max-tool-steps must be in [1, 16]")
-    if not args.interactive and not args.agent \
+    if not args.interactive and not args.chat and not args.agent \
             and not args.prompt and not args.prompt_ids:
-        ap.error("provide --prompt, --prompt-ids, --interactive or --agent")
+        ap.error("provide --prompt, --prompt-ids or a REPL mode")
 
-    ui = TerminalUI(active=args.interactive or args.agent, context=args.context,
+    ui = TerminalUI(active=args.interactive or args.chat or args.agent,
+                    context=args.context,
                     color=args.color, spinner=not args.no_spinner)
     ui.banner()
     ui.start_wait("Loading three resident model handles")
@@ -543,12 +547,12 @@ def main() -> int:
                          embedding=args.embedding, context=args.context,
                          timeout=args.timeout, tokenizer=args.tokenizer,
                          resident_kv=not args.host_kv,
-                         quiet_executor=(args.interactive or args.agent)
+                         quiet_executor=(args.interactive or args.chat or args.agent)
                          and not args.verbose_executor)
     finally:
         ui.stop_wait()
     load_ms = (time.perf_counter() - began) * 1000.0
-    if args.interactive or args.agent:
+    if args.interactive or args.chat or args.agent:
         ui.ready(len(session.models), load_ms / 1000.0)
     else:
         print(f"loaded {len(session.models)} handles in {load_ms / 1000:.1f} s; "
@@ -793,6 +797,127 @@ def main() -> int:
                 if not turn_finished:
                     results.append({"mode": "agent", "prompt": spec,
                                     "reason": "agent_incomplete"})
+        if args.chat:
+            messages = []
+            repl_max_new = args.max_new
+            ui.info("Chat ready · /help · /context · /clear · /max N · /quit")
+
+            def chat_ids(*, generation_prompt=True):
+                rendered = agent.render_chat(
+                    messages, tools=[], add_generation_prompt=generation_prompt,
+                    enable_thinking=False)
+                return list(session.tokenizer.encode(
+                    rendered, add_special_tokens=False).ids)
+
+            while True:
+                try:
+                    spec = input(ui.prompt()).strip()
+                except EOFError:
+                    print("", flush=True)
+                    break
+                except KeyboardInterrupt:
+                    print("\nUse /quit or Ctrl-D to exit.", flush=True)
+                    continue
+                if not spec:
+                    continue
+                if spec in {"/quit", "/exit"}:
+                    break
+                if spec == "/help":
+                    ui.info(
+                        "Official MiniCPM5 chat template; no tools. "
+                        f"ctx{args.context}; max-new={repl_max_new}. Commands: "
+                        "/context, /clear, /max N, /quit.")
+                    continue
+                if spec == "/context":
+                    used = len(chat_ids(generation_prompt=False))
+                    ui.info(
+                        f"ctx{args.context}: {used} history tokens used, "
+                        f"{max(0, args.context - used)} available")
+                    continue
+                if spec in {"/clear", "/reset"}:
+                    messages.clear()
+                    ui.info("Conversation cleared.")
+                    continue
+                if spec == "/max":
+                    ui.info(
+                        f"max-new={repl_max_new}; allowed=1..{args.context - 1}")
+                    continue
+                if spec.startswith("/max "):
+                    try:
+                        requested = int(spec.split(None, 1)[1])
+                    except ValueError:
+                        ui.info("Usage: /max N")
+                        continue
+                    if requested < 1 or requested >= args.context:
+                        ui.info(f"N must be in [1, {args.context - 1}]")
+                        continue
+                    repl_max_new = requested
+                    ui.info(f"max-new={repl_max_new}")
+                    continue
+
+                messages.append({"role": "user", "content": spec})
+                ids = chat_ids()
+                cleared = False
+                while len(ids) >= args.context - 8 and len(messages) > 1:
+                    # Remove the oldest complete user/assistant turn while
+                    # retaining the current user request.
+                    del messages[:2]
+                    cleared = True
+                    ids = chat_ids()
+                if cleared:
+                    ui.info("Older conversation was cleared to fit ctx1024.")
+                if len(ids) >= args.context - 8:
+                    messages.pop()
+                    ui.info(
+                        f"Context full ({len(ids)}/{args.context}); shorten the "
+                        "request or use /clear.")
+                    continue
+
+                limit = min(repl_max_new, args.context - len(ids))
+                decoder = agent.StableTextStream(
+                    session.tokenizer, skip_special_tokens=True)
+                prefix_shown = False
+
+                def chat_stream(token_ids):
+                    nonlocal prefix_shown
+                    suffix = decoder.update(token_ids)
+                    if not suffix:
+                        return
+                    if not prefix_shown:
+                        ui.stop_wait()
+                        ui.model_prefix()
+                        prefix_shown = True
+                    print(suffix, end="", flush=True)
+
+                ui.start_wait("MiniCPM is thinking")
+                try:
+                    reason, out, steps = session.generate(
+                        ids, limit, {1, 130073}, start=0,
+                        on_token=chat_stream)
+                finally:
+                    ui.stop_wait()
+                suffix, reconciled = decoder.finish(out)
+                if not prefix_shown:
+                    ui.model_prefix()
+                    prefix_shown = True
+                print(suffix, flush=True)
+                final_text = session.tokenizer.decode(
+                    out, skip_special_tokens=True).strip()
+                if not reconciled:
+                    ui.info("Streaming decoder could not reconcile the final text.")
+                messages.append({"role": "assistant", "content": final_text})
+                generated_steps = steps[len(ids) - 1:]
+                ui.turn_summary(len(out), generated_steps, reason)
+                results.append({
+                    "mode": "chat", "prompt": spec, "text": final_text,
+                    "ids": out, "reason": reason, "max_new": repl_max_new,
+                    "step_ms": steps, "phase_ms": session.last_phase_steps,
+                })
+                if reason == "max":
+                    print(f"[reached max-new={repl_max_new}; "
+                          "use /max N to increase it]", flush=True)
+                elif reason == "context":
+                    print(f"[reached ctx{args.context} limit]", flush=True)
         if args.interactive:
             ui.info("Commands: /help · /max N · /reset · /quit")
             epoch = 0
@@ -841,20 +966,20 @@ def main() -> int:
                     epoch += 1
                     ui.info("Context reset.")
                     continue
-                shown = ""
+                decoder = agent.StableTextStream(
+                    session.tokenizer, skip_special_tokens=True)
                 prefix_shown = False
 
                 def stream(token_ids):
-                    nonlocal shown, prefix_shown
+                    nonlocal prefix_shown
+                    suffix = decoder.update(token_ids)
+                    if not suffix:
+                        return
                     if not prefix_shown:
                         ui.stop_wait()
                         ui.model_prefix()
                         prefix_shown = True
-                    rendered = session.tokenizer.decode(
-                        token_ids, skip_special_tokens=True)
-                    if rendered.startswith(shown):
-                        print(rendered[len(shown):], end="", flush=True)
-                        shown = rendered
+                    print(suffix, end="", flush=True)
 
                 ui.start_wait("MiniCPM is thinking")
                 try:
@@ -867,12 +992,10 @@ def main() -> int:
                 if not prefix_shown:
                     ui.model_prefix()
                     prefix_shown = True
-                if record["text"].startswith(shown):
-                    print(record["text"][len(shown):], flush=True)
-                else:
-                    print("", flush=True)
-                    ui.model_prefix()
-                    print(record["text"], flush=True)
+                suffix, reconciled = decoder.finish(record["ids"])
+                print(suffix, flush=True)
+                if not reconciled:
+                    ui.info("Streaming decoder could not reconcile the final text.")
                 ui.turn_summary(len(record["ids"]), _gen, record["reason"])
                 if record["reason"] == "max":
                     print(f"[reached max-new={repl_max_new}; "

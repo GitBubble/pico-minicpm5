@@ -40,3 +40,6 @@ uses the official `<tools>/<function>/<param>/<tool_response>` chat contract,
 supports multi-step tool feedback and conversation history, confines file
 tools to a workspace, and asks before every write or shell command. `chat.sh`
 remains the plain conversational REPL, and one-shot `--prompt` stays available.
+The chat entry now uses the official no-tools chat template. UTF-8-safe
+incremental decoding buffers incomplete CJK byte pieces, fixing the terminal
+stall and whole-answer replay previously seen around split characters.

@@ -22,15 +22,21 @@ fi
 TOKENIZERS=${TOKENIZERS:-}
 MAX_NEW=${MAX_NEW:-128}
 
-# With no arguments and no PROMPT override, start the plain chat REPL. Agent
-# mode has its own entry point in agent.sh. Explicit CLI arguments are
-# forwarded unchanged so `chat.sh --prompt ...` does not also run a hidden
-# default prompt.
-if [ "$#" -eq 0 ]; then
-  if [ "${PROMPT+x}" = x ]; then
+# Chat remains the default when callers only pass display/runtime options.
+# An explicit prompt or mode is forwarded unchanged for compatibility.
+MODE_SET=0
+for ARG in "$@"; do
+  case "$ARG" in
+    --prompt|--prompt=*|--prompt-ids|--prompt-ids=*|--interactive|--chat|--agent)
+      MODE_SET=1
+      ;;
+  esac
+done
+if [ "$MODE_SET" -eq 0 ]; then
+  if [ "$#" -eq 0 ] && [ "${PROMPT+x}" = x ]; then
     set -- --prompt "$PROMPT" --max-new "$MAX_NEW"
   else
-    set -- --interactive --max-new "$MAX_NEW"
+    set -- --chat --max-new "$MAX_NEW" "$@"
   fi
 fi
 

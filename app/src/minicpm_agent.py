@@ -36,6 +36,43 @@ class ToolExecutionError(RuntimeError):
     """A requested tool could not be executed safely."""
 
 
+class StableTextStream:
+    """Decode growing token prefixes without exposing incomplete UTF-8.
+
+    Byte-level tokenizers may temporarily decode half of a CJK character as
+    U+FFFD and replace it once the next token arrives.  Emitting that temporary
+    replacement makes an append-only terminal stream impossible to repair.
+    Keep trailing replacement characters buffered until they become stable.
+    """
+
+    def __init__(self, tokenizer, *, skip_special_tokens: bool = True):
+        self.tokenizer = tokenizer
+        self.skip_special_tokens = skip_special_tokens
+        self.text = ""
+
+    def update(self, token_ids) -> str:
+        rendered = self.tokenizer.decode(
+            token_ids, skip_special_tokens=self.skip_special_tokens)
+        stable = rendered.rstrip("\ufffd")
+        if not stable.startswith(self.text):
+            # Keep the last known-good prefix. A later token may make the
+            # tokenizer's decoded prefix stable again.
+            return ""
+        suffix = stable[len(self.text):]
+        self.text = stable
+        return suffix
+
+    def finish(self, token_ids) -> tuple[str, bool]:
+        """Return the final append-only suffix and whether it reconciled."""
+        rendered = self.tokenizer.decode(
+            token_ids, skip_special_tokens=self.skip_special_tokens)
+        if not rendered.startswith(self.text):
+            return "", False
+        suffix = rendered[len(self.text):]
+        self.text = rendered
+        return suffix, True
+
+
 @dataclass(frozen=True)
 class ToolCall:
     name: str

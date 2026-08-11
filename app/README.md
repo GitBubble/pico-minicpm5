@@ -33,7 +33,7 @@ part of this repository.
 cd /opt/pico-minicpm5
 chmod +x app/chat.sh app/agent.sh app/bin/pico_persistent_acl_executor.aarch64
 
-# Plain conversational REPL.
+# Official MiniCPM5 chat template, without tools.
 ./app/chat.sh
 
 # Native tool-calling agent. The three handles load only once.
@@ -57,7 +57,10 @@ MiniCPM ✦ ...
 You ❯ /quit
 ```
 
-The board demo defaults to `ctx1024` and the official MiniCPM5 chat template.
+Both board applications default to `ctx1024`. `chat.sh` uses the official
+MiniCPM5 chat template without tool definitions and retains conversation
+history until `/clear`. `agent.sh` adds the native tool protocol described
+below.
 Tool definitions are rendered inside `<tools>`, the model emits its trained
 `<function>/<param>` XML, and results return through `<tool_response>`. The
 agent retains conversation/tool history until `/clear`; model handles,
@@ -98,7 +101,13 @@ For a single non-interactive prompt:
 ```
 
 These `--prompt` examples retain the raw-completion path. With no arguments,
-`chat.sh` starts the plain prompt REPL and `agent.sh` starts the native agent.
+`chat.sh` starts the official no-tools chat REPL and `agent.sh` starts the
+native agent. Explicit `chat.sh --interactive` retains the legacy raw prompt
+REPL.
+
+Both REPLs use an append-only UTF-8-safe decoder. CJK characters split across
+token boundaries are buffered until complete, preventing output stalls and
+whole-answer replay.
 
 Both launchers accept extra server arguments after the script name and
 recognize these environment overrides:

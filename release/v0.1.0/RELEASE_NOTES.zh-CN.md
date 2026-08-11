@@ -30,3 +30,5 @@ REPL 回答现在会随 token 生成逐步显示，默认上限为 128 token，�
 的 `<tools>/<function>/<param>/<tool_response>` 合同，支持多轮工具回填、会话历史、
 工作区边界和每次确认的写入/shell 权限。`app/chat.sh` 保持纯对话 REPL，单次
 `--prompt` 路径继续保留。
+聊天入口现使用官方无工具 chat template；UTF-8 安全增量解码会缓存尚未完整的
+汉字 token，修复此前遇到拆分汉字时界面暂停并在结束后整段重放的问题。

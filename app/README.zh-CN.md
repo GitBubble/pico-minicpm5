@@ -31,7 +31,7 @@ SDK 环境提供，开源仓库和 Release 不会重新分发这些动态库。
 cd /opt/pico-minicpm5
 chmod +x app/chat.sh app/agent.sh app/bin/pico_persistent_acl_executor.aarch64
 
-# 纯对话 REPL
+# MiniCPM5 官方无工具 chat template
 ./app/chat.sh
 
 # 原生工具调用 Agent，三个模型句柄只加载一次
@@ -55,7 +55,9 @@ MiniCPM ✦ ...
 You ❯ /quit
 ```
 
-板端 Demo 默认使用 `ctx1024` 和 MiniCPM5 官方 chat template。工具定义放在
+两个板端应用都默认使用 `ctx1024`。`chat.sh` 使用 MiniCPM5 官方无工具 chat
+template，并保留多轮历史直至 `/clear`；`agent.sh` 再加入下面描述的原生工具
+协议。工具定义放在
 `<tools>` 中，模型原生生成 `<function>/<param>` XML，执行结果通过
 `<tool_response>` 回填；没有自定义另一套工具协议。Agent 会保留当前会话和
 工具历史，`/clear` 可清空。模型句柄、executor 和板端缓冲区持续常驻，避免
@@ -92,8 +94,12 @@ token、工具定义、会话历史和工具结果。上下文不足时 Agent �
 ./app/chat.sh --prompt '1+1 equals' --max-new 16
 ```
 
-这些 `--prompt` 命令保留裸文本续写兼容路径。无参数运行时，`chat.sh` 进入纯
-对话 REPL，`agent.sh` 进入原生工具调用 Agent，两个入口互不改变对方的默认行为。
+这些 `--prompt` 命令保留裸文本续写兼容路径。无参数运行时，`chat.sh` 进入官方
+无工具对话 REPL，`agent.sh` 进入原生工具调用 Agent，两个入口互不改变对方的
+默认行为。显式执行 `chat.sh --interactive` 可进入旧的裸文本 REPL。
+
+两个 REPL 均使用 UTF-8 安全的追加式增量解码。跨 token 的汉字会等待完整后再
+显示，不会因为临时的 `�` 字符而停止刷新或在结束时整段重放。
 
 两个脚本都支持下列环境变量，脚本名之后的额外参数会继续传给板端 server：
 

@@ -51,6 +51,21 @@ def test_render_chat_groups_tool_responses() -> None:
     assert rendered.count("<tool_response>") == 2
 
 
+def test_stable_stream_buffers_incomplete_cjk_token() -> None:
+    agent = _agent_module()
+
+    class Tokenizer:
+        def decode(self, ids, skip_special_tokens=True):
+            assert skip_special_tokens
+            return {1: "秦汉的兵马\ufffd", 2: "秦汉的兵马俑"}[len(ids)]
+
+    stream = agent.StableTextStream(Tokenizer())
+    assert stream.update([1]) == "秦汉的兵马"
+    assert stream.update([1, 2]) == "俑"
+    assert stream.finish([1, 2]) == ("", True)
+    assert stream.text == "秦汉的兵马俑"
+
+
 def test_parse_multiple_calls_and_cdata() -> None:
     agent = _agent_module()
     calls, visible = agent.parse_tool_calls(

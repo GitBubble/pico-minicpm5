@@ -140,6 +140,66 @@ def test_agent_repl_executes_native_tool_call(monkeypatch, capsys, tmp_path) -> 
     assert "hello from tool" in rendered_prompts[1]
 
 
+def test_chat_repl_uses_template_and_streams_split_cjk_once(
+        monkeypatch, capsys) -> None:
+    server = _server_module()
+    rendered_prompts = []
+
+    class Tokenizer:
+        def encode(self, text, add_special_tokens=False):
+            assert not add_special_tokens
+            rendered_prompts.append(text)
+            return SimpleNamespace(ids=[0, 42])
+
+        def decode(self, ids, skip_special_tokens=True):
+            assert skip_special_tokens
+            values = tuple(ids)
+            if values == (100,):
+                return "秦汉的兵马\ufffd"
+            return "秦汉的兵马俑"
+
+    class Session:
+        models = [object(), object(), object()]
+        kv_slots = {0: (0, 1), 1: (0, 1)}
+        tokenizer = Tokenizer()
+        last_phase_steps = []
+
+        def __init__(self, **_kwargs):
+            pass
+
+        def generate(self, ids, *_args, **kwargs):
+            callback = kwargs["on_token"]
+            callback((100,))
+            callback((100, 101))
+            callback((100, 101, 130073))
+            self.last_phase_steps = [{"position": 0}]
+            return "eos", [100, 101, 130073], [1.0] * (len(ids) + 3)
+
+        def close(self):
+            pass
+
+    prompts = iter(["我爱中国。", "/quit"])
+    monkeypatch.setattr(server, "Merged", Session)
+    monkeypatch.setattr(builtins, "input", lambda _prompt: next(prompts))
+    monkeypatch.setattr(sys, "argv", [
+        "merged_board_server.py", "--persistent-executor", "executor",
+        "--decode-model", "decode.om", "--prefill-model", "prefill.om",
+        "--head-model", "head.om", "--embedding", "embedding.bin",
+        "--tokenizer", "tokenizer.json", "--chat",
+    ])
+
+    assert server.main() == 0
+
+    output = capsys.readouterr().out
+    assert output.count("秦汉的兵马俑") == 1
+    assert "\ufffd" not in output
+    assert "Chat ready" in output
+    assert "<|im_start|>user\n我爱中国。<|im_end|>" in rendered_prompts[0]
+    assert "<tools>" not in rendered_prompts[0]
+    assert rendered_prompts[0].endswith(
+        "<|im_start|>assistant\n<think>\n\n</think>\n\n")
+
+
 def test_terminal_ui_color_can_be_forced(monkeypatch, capsys) -> None:
     server = _server_module()
     monkeypatch.delenv("NO_COLOR", raising=False)
@@ -221,15 +281,25 @@ def test_chat_and_agent_launchers_are_separate(tmp_path: Path) -> None:
         ["sh", str(script)], env=environment, text=True,
         capture_output=True, check=True).stdout.splitlines()
     assert "--agent" not in repl
-    assert "--interactive" in repl
+    assert "--chat" in repl
+    assert "--interactive" not in repl
     assert "--prompt" not in repl
     assert repl[repl.index("--context") + 1] == "1024"
+
+    chat_with_options = subprocess.run(
+        ["sh", str(script), "--no-spinner", "--color", "never"],
+        env=environment, text=True, capture_output=True, check=True,
+    ).stdout.splitlines()
+    assert "--chat" in chat_with_options
+    assert "--no-spinner" in chat_with_options
+    assert "--interactive" not in chat_with_options
 
     agent = subprocess.run(
         ["sh", str(PROJECT / "app" / "agent.sh")], env=environment,
         text=True, capture_output=True, check=True,
     ).stdout.splitlines()
     assert "--agent" in agent
+    assert "--chat" not in agent
     assert "--interactive" not in agent
     assert "--prompt" not in agent
     assert agent[agent.index("--max-new") + 1] == "128"

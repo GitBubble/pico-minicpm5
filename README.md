@@ -99,7 +99,8 @@ cd /opt/pico-minicpm5
 ./app/agent.sh      # tool-calling agent
 ```
 
-`chat.sh` starts a colour-aware plain conversational REPL. `agent.sh` starts
+`chat.sh` starts a colour-aware conversational REPL using the official
+MiniCPM5 chat template without tools. `agent.sh` starts
 the resident agent at the default `ctx1024`, using the
 official MiniCPM5 `<tools>/<function>/<tool_response>` protocol. It includes
 workspace read/search/git tools plus approval-gated write/shell tools, a
@@ -108,6 +109,8 @@ Commands include `/tools`, `/permissions`, `/context`, `/clear`, `/max N` and
 `/quit`. The two entry points use the same three resident OM handles but remain
 separate applications. For a one-shot completion use
 `./app/chat.sh --prompt 'The capital of France is' --max-new 16`.
+The explicit `--prompt` and `--interactive` options retain the legacy raw-text
+completion mode for compatibility.
 
 ## Quick start
 

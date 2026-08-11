@@ -281,7 +281,9 @@ the redistribution terms of their ATC/DDK and runtime installation.
 
 See [docs/PIPELINE.md](docs/PIPELINE.md),
 [docs/OM_COMPOSITION.md](docs/OM_COMPOSITION.md) and
-[docs/RELEASE.md](docs/RELEASE.md) for the exact contracts.
+[docs/RELEASE.md](docs/RELEASE.md) for the exact build/release contracts. The
+[Agent routing and runtime-context profile design](docs/AGENT_ROUTING_AND_CONTEXT_PROFILES.md)
+defines hybrid routing and the ctx128/1024/4096/8192 capability matrix.
 
 ## Development
 

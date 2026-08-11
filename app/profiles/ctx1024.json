@@ -1,0 +1,20 @@
+{
+  "schema": "pico.minicpm5.runtime-profile.v1",
+  "name": "ctx1024",
+  "status": "qualified",
+  "context": {"capacity": 1024, "past_length": 1023},
+  "capabilities": {"chat": true, "agent": true, "completion": true},
+  "generation": {
+    "default_max_new": 128,
+    "max_new_limit": 1023,
+    "reserve_tokens": 128,
+    "compact_at_tokens": 896
+  },
+  "agent": {"max_tool_steps": 4, "max_tool_output_chars": 800},
+  "models": {
+    "decode": "models/decode.om",
+    "prefill": "models/prefill.om",
+    "head": "models/head_flat.om"
+  },
+  "numeric_gate": {"minimum_cosine_exclusive": 0.98}
+}

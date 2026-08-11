@@ -14,10 +14,11 @@ The deterministic archive normalizes owners, modes and timestamps and rejects
 weights, ONNX, OM, binary tensors, shared libraries, image lists, large files,
 absolute developer paths and board-address markers.
 
-Expected public source artifacts are the sdist/source archive, wheel, SBOM and
-checksums. The release workflow fixes `SOURCE_DATE_EPOCH`, runs the tests,
-emits an SPDX 2.3 file-level SBOM and checksums the wheel, sdist and custom
-source archive. It regenerates `SHA256SUMS` through a temporary file, atomically
+Expected public source artifacts are one canonical Python sdist, one wheel, the
+SBOM and checksums. The custom source scanner runs in `--check-only` mode as a
+privacy/portability gate, avoiding a second near-duplicate source tarball. The
+release workflow fixes `SOURCE_DATE_EPOCH`, runs the tests and emits an SPDX
+2.3 file-level SBOM. It regenerates `SHA256SUMS` through a temporary file, atomically
 replaces the previous checksum list, and immediately runs `sha256sum -c` from
 the repository root. Re-running the step therefore cannot checksum the old
 checksum list or create a self-referential entry. No proprietary or

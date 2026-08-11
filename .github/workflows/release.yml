@@ -24,7 +24,9 @@ jobs:
       - name: Set reproducible timestamp
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
       - run: python -m build
-      - run: PYTHONPATH=src python -m pico_minicpm5.cli release source --out artifacts
+      # The standard sdist is the one canonical source archive. Run the
+      # strict scanner as a gate without publishing a second tarball.
+      - run: PYTHONPATH=src python -m pico_minicpm5.cli release source --check-only
       - run: PYTHONPATH=src python -m pico_minicpm5.cli release sbom --out artifacts/pico-minicpm5-0.1.0.spdx.json
       - name: Checksum all source artifacts
         run: |

@@ -10,9 +10,10 @@ pico-minicpm5 release source --out artifacts
 pico-minicpm5 release sbom --out artifacts/pico-minicpm5-0.1.0.spdx.json
 ```
 
-源码归档规范化 owner、mode 和 timestamp，并拒绝权重、ONNX、OM、tensor、动态库、
-image list、异常大文件、开发机绝对路径和板端地址。公开源码产物保留标准 sdist、
-wheel、SBOM 与 checksum；GitHub 自动提供 tag 的 source code 归档。
+源码 scanner 规范化并检查 owner、mode、timestamp，同时拒绝权重、ONNX、OM、
+tensor、动态库、image list、异常大文件、开发机绝对路径和板端地址。发布时只以
+`--check-only` 运行该门禁；公开源码产物保留一份标准 sdist、wheel、SBOM 与
+checksum，避免近似重复的第二份源码 tarball；GitHub 也会自动提供 tag 源码归档。
 
 ## 板端 runtime 归档
 

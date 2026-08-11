@@ -45,20 +45,23 @@ import qualify_minicpm_greedy_chain as gc  # noqa: E402
 import pico_minicpm5_split_board_runner as runner  # noqa: E402
 import probe_om_execute_latency as probe  # noqa: E402
 import minicpm_agent as agent  # noqa: E402
+import minicpm_profile as profile_contract  # noqa: E402
 
 HIDDEN, KV_HEADS, HEAD_DIM, LAYERS = gc.HIDDEN, gc.KV_HEADS, gc.HEAD_DIM, gc.LAYERS
 CHANNELS = LAYERS * KV_HEADS
 
 
 def agent_command_help(topic, *, context, max_new, thinking, max_tool_steps,
-                       workspace):
+                       workspace, max_new_limit=None, profile_name="legacy"):
     """Return Linux-style help for the agent's local REPL commands."""
     canonical = str(topic or "").strip().lower().lstrip("/")
     aliases = {"exit": "quit", "reset": "clear"}
     canonical = aliases.get(canonical, canonical)
-    maximum = int(context) - 1
+    hardware_maximum = int(context) - 1
+    maximum = hardware_maximum if max_new_limit is None else min(
+        int(max_new_limit), hardware_maximum)
     state = "on" if thinking else "off"
-    command_names = "help|tools|permissions|think|context|clear|max|quit"
+    command_names = "help|profile|tools|permissions|think|context|clear|max|quit"
 
     details = {
         "help": (
@@ -69,6 +72,13 @@ def agent_command_help(topic, *, context, max_new, thinking, max_tool_steps,
             "  /help COMMAND\n\n"
             "SCOPE\n"
             "  COMMAND 可写为 max 或 /max；不带参数时列出全部命令。"),
+        "profile": (
+            "NAME\n"
+            "  /profile - 显示当前运行时 profile 与能力边界\n\n"
+            "SYNOPSIS\n"
+            "  /profile\n\n"
+            "SCOPE\n"
+            f"  当前为 {profile_name} / ctx{context}；profile 只能在启动时选择。"),
         "tools": (
             "NAME\n"
             "  /tools - 列出当前 Agent 注册的原生工具\n\n"
@@ -113,7 +123,8 @@ def agent_command_help(topic, *, context, max_new, thinking, max_tool_steps,
             "  /max\n"
             "  /max N\n\n"
             "RANGE\n"
-            f"  N 必须为整数 1..{maximum}；当前为 {max_new}。实际输出还受剩余上下文限制。"),
+            f"  配置范围 1..{maximum}，硬件范围 1..{hardware_maximum}；"
+            f"当前为 {max_new}。实际输出还受剩余上下文限制。"),
         "quit": (
             "NAME\n"
             "  /quit - 退出 Agent REPL\n\n"
@@ -137,6 +148,7 @@ def agent_command_help(topic, *, context, max_new, thinking, max_tool_steps,
         "  /help [COMMAND]\n\n"
         "命令:\n"
         "  /help [COMMAND]  显示全部帮助，或查看一个命令的详细说明\n"
+        f"  /profile         显示运行 profile（当前 {profile_name}）\n"
         "  /tools           列出原生工具；只查看，不执行\n"
         "  /permissions     显示自动执行与逐次授权范围\n"
         f"  /think [on|off]  查看或切换 thinking（当前 {state}）\n"
@@ -149,6 +161,7 @@ def agent_command_help(topic, *, context, max_new, thinking, max_tool_steps,
         f"  每个用户请求最多 {max_tool_steps} 轮工具调用。\n"
         "  上述命令由本地 REPL 处理，不发送给模型。\n\n"
         "详细帮助:\n"
+        "  /help profile   查看 profile 的选择范围\n"
         "  /help max       查看 /max 的参数范围\n"
         "  /help think     查看 thinking 的作用域\n"
         "  /help permissions")
@@ -319,6 +332,7 @@ class Merged:
         self._deadline = time.monotonic() + timeout
         self.descriptors = probe._read_ready(
             self.process.stdout, len(self.models), self._deadline)
+        self._validate_context_descriptors()
         self.kv_slots = self._identify_kv()
 
     # -- transport -------------------------------------------------------
@@ -387,6 +401,27 @@ class Merged:
             if size in (HIDDEN * 4, HIDDEN * 16):
                 return slot
         raise RuntimeError(f"model {index} publishes no hidden")
+
+    def _validate_context_descriptors(self):
+        """Fail before execution when an OM does not match runtime context."""
+        expected = (
+            self.context * 4,
+            HEAD_DIM * HEAD_DIM * 4,
+            self.cache_bytes,
+            self.cache_bytes,
+        )
+        for model in {self.decode_index, self.prefill_index}:
+            inputs, outputs = self.descriptors[model]
+            if len(inputs) < 5 or len(outputs) != 3:
+                raise RuntimeError(
+                    f"model {model}: expected >=5 inputs/3 outputs for "
+                    f"ctx{self.context}, got {len(inputs)}/{len(outputs)}")
+            observed = tuple(inputs[1:5])
+            if observed != expected:
+                raise RuntimeError(
+                    f"model {model}: descriptor/context mismatch for "
+                    f"ctx{self.context}; mask/rope/k/v={observed}, "
+                    f"expected={expected}")
 
     def _run(self, model, writes, chains=(), *, publish=True,
              output_count=None):
@@ -588,16 +623,25 @@ class Merged:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--persistent-executor", type=Path, required=True)
-    ap.add_argument("--decode-model", type=Path, required=True)
+    ap.add_argument("--decode-model", type=Path)
     ap.add_argument("--prefill-model", type=Path)
-    ap.add_argument("--head-model", type=Path, required=True)
+    ap.add_argument("--head-model", type=Path)
+    ap.add_argument(
+        "--profile",
+        help="runtime profile name or JSON path (ctx128/1024/4096/8192)")
+    ap.add_argument(
+        "--deployment-root", type=Path, default=HERE.parent.parent,
+        help="root used to resolve model paths in a runtime profile")
+    ap.add_argument(
+        "--allow-unqualified-profile", action="store_true",
+        help="allow a pending profile for controlled development only")
     ap.add_argument("--library-path", type=Path, action="append", default=[])
     ap.add_argument("--embedding", type=Path, required=True)
     ap.add_argument("--tokenizer", type=Path)
     ap.add_argument(
         "--host-kv", action="store_true",
         help="compatibility path: return packed K/V to Python and write it back")
-    ap.add_argument("--context", type=int, default=1024)
+    ap.add_argument("--context", type=int)
     ap.add_argument("--timeout", type=float, default=1800.0)
     ap.add_argument("--prompt", action="append", default=[])
     ap.add_argument("--prompt-ids", action="append", default=[])
@@ -617,9 +661,9 @@ def main() -> int:
         "--workspace", type=Path, default=Path.cwd(),
         help="filesystem boundary for agent tools (default: current directory)")
     ap.add_argument(
-        "--max-tool-steps", type=int, default=4,
+        "--max-tool-steps", type=int,
         help="maximum model/tool rounds per user turn")
-    ap.add_argument("--max-new", type=int, default=128)
+    ap.add_argument("--max-new", type=int)
     ap.add_argument(
         "--color", choices=("auto", "always", "never"), default="auto",
         help="terminal colour policy (default: auto; PICO_MINICPM5_COLOR also applies)")
@@ -637,6 +681,48 @@ def main() -> int:
     ap.add_argument("--capture-dir", type=Path)
     ap.add_argument("--capture-position", type=int)
     args = ap.parse_args()
+    runtime_profile = None
+    mode = "agent" if args.agent else "chat" if args.chat else "completion"
+    if args.profile:
+        try:
+            runtime_profile = profile_contract.load_runtime_profile(
+                args.profile, HERE.parent / "profiles")
+            runtime_profile.require_mode(
+                mode, allow_unqualified=args.allow_unqualified_profile)
+        except profile_contract.ProfileError as error:
+            ap.error(str(error))
+        configured = runtime_profile.model_paths(args.deployment_root)
+        for attribute, role in (
+                ("decode_model", "decode"), ("prefill_model", "prefill"),
+                ("head_model", "head")):
+            supplied = getattr(args, attribute)
+            expected = configured[role]
+            if supplied is not None and supplied.expanduser().resolve() != expected:
+                ap.error(
+                    f"--{attribute.replace('_', '-')} conflicts with profile "
+                    f"{runtime_profile.name}: expected {expected}")
+            setattr(args, attribute, expected)
+        if args.context is not None and args.context != runtime_profile.context:
+            ap.error(
+                f"--context {args.context} conflicts with profile "
+                f"{runtime_profile.name} ctx{runtime_profile.context}")
+        args.context = runtime_profile.context
+        if args.max_new is None:
+            args.max_new = runtime_profile.default_max_new
+        if args.max_tool_steps is None:
+            args.max_tool_steps = runtime_profile.max_tool_steps
+        args.max_new_limit = runtime_profile.max_new_limit
+        args.profile_name = runtime_profile.name
+    else:
+        args.context = 1024 if args.context is None else args.context
+        args.max_new = 128 if args.max_new is None else args.max_new
+        args.max_tool_steps = 4 if args.max_tool_steps is None else args.max_tool_steps
+        args.max_new_limit = args.context - 1
+        args.profile_name = "legacy"
+        if args.decode_model is None or args.head_model is None:
+            ap.error("--decode-model and --head-model are required without --profile")
+    if args.max_new < 1 or args.max_new > args.max_new_limit:
+        ap.error(f"--max-new must be in [1, {args.max_new_limit}]")
     if (args.capture_dir is None) != (args.capture_position is None):
         ap.error("--capture-dir and --capture-position must be provided together")
     if args.capture_position is not None and args.capture_position < 0:
@@ -654,8 +740,10 @@ def main() -> int:
         ap.error("--chat/--agent are interactive REPLs; omit --prompt")
     if args.thinking and not args.agent:
         ap.error("--thinking requires --agent")
-    if args.max_tool_steps < 1 or args.max_tool_steps > 16:
-        ap.error("--max-tool-steps must be in [1, 16]")
+    if args.agent and (args.max_tool_steps < 1 or args.max_tool_steps > 16):
+        ap.error("--max-tool-steps must be in [1, 16] for agent mode")
+    if not args.agent and (args.max_tool_steps < 0 or args.max_tool_steps > 16):
+        ap.error("--max-tool-steps must be in [0, 16]")
     if not args.interactive and not args.chat and not args.agent \
             and not args.prompt and not args.prompt_ids:
         ap.error("provide --prompt, --prompt-ids or a REPL mode")
@@ -680,6 +768,9 @@ def main() -> int:
     load_ms = (time.perf_counter() - began) * 1000.0
     if args.interactive or args.chat or args.agent:
         ui.ready(len(session.models), load_ms / 1000.0)
+        ui.info(
+            f"profile={args.profile_name} · ctx{args.context} · "
+            f"max-new={args.max_new} · configured-limit={args.max_new_limit}")
     else:
         print(f"loaded {len(session.models)} handles in {load_ms / 1000:.1f} s; "
               f"kv slots {session.kv_slots}", flush=True)
@@ -725,7 +816,10 @@ def main() -> int:
                             "step_ms": steps,
                             "phase_ms": session.last_phase_steps})
         if args.agent:
-            workspace_tools = agent.WorkspaceTools(args.workspace)
+            tool_output_limit = runtime_profile.max_tool_output_chars \
+                if runtime_profile else agent.MAX_TOOL_OUTPUT_CHARS
+            workspace_tools = agent.WorkspaceTools(
+                args.workspace, max_output_chars=tool_output_limit)
             system_message = {
                 "role": "system",
                 "content": (
@@ -784,7 +878,18 @@ def main() -> int:
                         topic, context=args.context, max_new=repl_max_new,
                         thinking=thinking_enabled,
                         max_tool_steps=args.max_tool_steps,
-                        workspace=workspace_tools.root))
+                        workspace=workspace_tools.root,
+                        max_new_limit=args.max_new_limit,
+                        profile_name=args.profile_name))
+                    continue
+                if spec == "/profile":
+                    capability = "agent" if runtime_profile is None \
+                        or runtime_profile.agent else "chat-only"
+                    status = runtime_profile.status if runtime_profile else "legacy"
+                    ui.info(
+                        f"profile={args.profile_name}; ctx={args.context}; "
+                        f"capability={capability}; status={status}; "
+                        f"max-new=1..{args.max_new_limit}")
                     continue
                 if spec == "/tools":
                     ui.info("Tools: " + ", ".join(workspace_tools.names))
@@ -820,7 +925,8 @@ def main() -> int:
                     continue
                 if spec == "/max":
                     ui.info(
-                        f"max-new={repl_max_new}; allowed=1..{args.context - 1}")
+                        f"max-new={repl_max_new}; configured=1..{args.max_new_limit}; "
+                        f"hardware=1..{args.context - 1}")
                     continue
                 if spec.startswith("/max "):
                     try:
@@ -828,31 +934,65 @@ def main() -> int:
                     except ValueError:
                         ui.info("Usage: /max N")
                         continue
-                    if requested < 1 or requested >= args.context:
-                        ui.info(f"N must be in [1, {args.context - 1}]")
+                    if requested < 1 or requested > args.max_new_limit:
+                        ui.info(f"N must be in [1, {args.max_new_limit}]")
                         continue
                     repl_max_new = requested
                     ui.info(f"max-new={repl_max_new}")
                     continue
 
+                turn_started = time.perf_counter()
                 previous_assistant = next((
                     str(message.get("content", ""))
                     for message in reversed(messages)
                     if message.get("role") == "assistant"), "")
                 messages.append({"role": "user", "content": spec})
-                routed_call = agent.route_obvious_read_only(
+                route_started = time.perf_counter()
+                route_decision = agent.route_obvious_read_only(
                     spec, previous_assistant)
+                route_ms = (time.perf_counter() - route_started) * 1000.0
+                tool_total_ms = 0.0
                 initial_tool_rounds = 0
-                if routed_call is not None:
+                if route_decision is not None:
+                    if len(route_decision.tool_calls) != 1:
+                        raise RuntimeError(
+                            "deterministic route must contain exactly one tool call")
+                    routed_call = route_decision.tool_calls[0]
                     routed_xml = agent.format_tool_call(routed_call)
                     messages.append({"role": "assistant", "content": routed_xml})
                     ui.info(f"⚙ {workspace_tools.preview(routed_call)}")
+                    tool_started = time.perf_counter()
                     tool_result = workspace_tools.execute(routed_call)
+                    tool_ms = (time.perf_counter() - tool_started) * 1000.0
+                    tool_total_ms += tool_ms
                     messages.append({
                         "role": "tool",
                         "content": workspace_tools.for_model(tool_result)})
                     decoded = json.loads(tool_result)
                     mark = "✓" if decoded["ok"] else "✗"
+                    if route_decision.mode == "DIRECT_TOOL":
+                        final_text = workspace_tools.for_direct(
+                            routed_call, tool_result)
+                        messages.append({
+                            "role": "assistant", "content": final_text})
+                        ui.info(
+                            f"{mark} {routed_call.name} · {tool_ms:.1f} ms · "
+                            "model skipped")
+                        print(final_text, flush=True)
+                        total_ms = (time.perf_counter() - turn_started) * 1000.0
+                        results.append({
+                            "mode": "agent", "prompt": spec,
+                            "text": final_text, "ids": [],
+                            "reason": "tool_direct", "thinking": False,
+                            "tool_rounds": 1, "step_ms": [], "phase_ms": [],
+                            "route_mode": route_decision.mode,
+                            "route_reason": route_decision.reason,
+                            "route_confidence": route_decision.confidence,
+                            "response_policy": route_decision.response_policy,
+                            "route_ms": route_ms, "tool_ms": tool_total_ms,
+                            "model_called": False, "total_ms": total_ms,
+                        })
+                        continue
                     summary = decoded["output"].splitlines()[0][:160]
                     ui.info(f"{mark} {routed_call.name}: {summary}")
                     initial_tool_rounds = 1
@@ -868,7 +1008,8 @@ def main() -> int:
                             messages[:] = [system_message,
                                            {"role": "user", "content": spec}]
                             ids = agent_ids()
-                            ui.info("Older conversation was cleared to fit ctx1024.")
+                            ui.info(
+                                f"Older conversation was cleared to fit ctx{args.context}.")
                         if len(ids) >= args.context - 8:
                             ui.info(
                                 f"Context full ({len(ids)}/{args.context}); "
@@ -948,6 +1089,19 @@ def main() -> int:
                             "tool_rounds": tool_round,
                             "step_ms": steps,
                             "phase_ms": session.last_phase_steps,
+                            "route_mode": route_decision.mode
+                            if route_decision else (
+                                "MODEL_NATIVE" if tool_round else "MODEL_ONLY"),
+                            "route_reason": route_decision.reason
+                            if route_decision else "model-native fallback",
+                            "route_confidence": route_decision.confidence
+                            if route_decision else None,
+                            "response_policy": route_decision.response_policy
+                            if route_decision else "MODEL_REASON",
+                            "route_ms": route_ms, "tool_ms": tool_total_ms,
+                            "model_called": True,
+                            "total_ms": (
+                                time.perf_counter() - turn_started) * 1000.0,
                         })
                         turn_finished = True
                         break
@@ -965,8 +1119,11 @@ def main() -> int:
                     for call in calls:
                         preview = workspace_tools.preview(call)
                         ui.info(f"⚙ {preview}")
+                        tool_started = time.perf_counter()
                         tool_result = workspace_tools.execute(
                             call, approve=approve_tool)
+                        tool_total_ms += (
+                            time.perf_counter() - tool_started) * 1000.0
                         messages.append({
                             "role": "tool",
                             "content": workspace_tools.for_model(tool_result)})
@@ -980,7 +1137,8 @@ def main() -> int:
         if args.chat:
             messages = []
             repl_max_new = args.max_new
-            ui.info("Chat ready · /help · /context · /clear · /max N · /quit")
+            ui.info(
+                "Chat ready · /help · /profile · /context · /clear · /max N · /quit")
 
             def chat_ids(*, generation_prompt=True):
                 rendered = agent.render_chat(
@@ -1005,8 +1163,16 @@ def main() -> int:
                 if spec == "/help":
                     ui.info(
                         "Official MiniCPM5 chat template; no tools. "
-                        f"ctx{args.context}; max-new={repl_max_new}. Commands: "
-                        "/context, /clear, /max N, /quit.")
+                        f"profile={args.profile_name}; ctx{args.context}; "
+                        f"max-new={repl_max_new}. Commands: /profile, /context, "
+                        "/clear, /max N, /quit.")
+                    continue
+                if spec == "/profile":
+                    status = runtime_profile.status if runtime_profile else "legacy"
+                    ui.info(
+                        f"profile={args.profile_name}; ctx={args.context}; "
+                        f"capability=chat; status={status}; "
+                        f"max-new=1..{args.max_new_limit}")
                     continue
                 if spec == "/context":
                     used = len(chat_ids(generation_prompt=False))
@@ -1020,7 +1186,8 @@ def main() -> int:
                     continue
                 if spec == "/max":
                     ui.info(
-                        f"max-new={repl_max_new}; allowed=1..{args.context - 1}")
+                        f"max-new={repl_max_new}; configured=1..{args.max_new_limit}; "
+                        f"hardware=1..{args.context - 1}")
                     continue
                 if spec.startswith("/max "):
                     try:
@@ -1028,8 +1195,8 @@ def main() -> int:
                     except ValueError:
                         ui.info("Usage: /max N")
                         continue
-                    if requested < 1 or requested >= args.context:
-                        ui.info(f"N must be in [1, {args.context - 1}]")
+                    if requested < 1 or requested > args.max_new_limit:
+                        ui.info(f"N must be in [1, {args.max_new_limit}]")
                         continue
                     repl_max_new = requested
                     ui.info(f"max-new={repl_max_new}")
@@ -1045,7 +1212,8 @@ def main() -> int:
                     cleared = True
                     ids = chat_ids()
                 if cleared:
-                    ui.info("Older conversation was cleared to fit ctx1024.")
+                    ui.info(
+                        f"Older conversation was cleared to fit ctx{args.context}.")
                 if len(ids) >= args.context - 8:
                     messages.pop()
                     ui.info(
@@ -1187,6 +1355,7 @@ def main() -> int:
     if args.report:
         args.report.write_text(json.dumps(
             {"schema": "pico.minicpm5.merged_board.v1",
+             "profile": args.profile_name, "context": args.context,
              "load_seconds": load_ms / 1000.0, "runs": results}, indent=2) + "\n")
     return 0
 

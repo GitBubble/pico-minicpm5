@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
-# MiniCPM5-1B ctx1024: resident-K/V three-handle SS928 demo.
+# MiniCPM5-1B multi-context resident-K/V SS928 demo.
 set -eu
 
 APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -20,7 +20,8 @@ else
   PYTHON_BIN=python3
 fi
 TOKENIZERS=${TOKENIZERS:-}
-MAX_NEW=${MAX_NEW:-128}
+MAX_NEW=${MAX_NEW:-}
+PROFILE=${PICO_PROFILE:-ctx1024}
 
 # Chat remains the default when callers only pass display/runtime options.
 # An explicit prompt or mode is forwarded unchanged for compatibility.
@@ -34,9 +35,17 @@ for ARG in "$@"; do
 done
 if [ "$MODE_SET" -eq 0 ]; then
   if [ "$#" -eq 0 ] && [ "${PROMPT+x}" = x ]; then
-    set -- --prompt "$PROMPT" --max-new "$MAX_NEW"
+    if [ -n "$MAX_NEW" ]; then
+      set -- --prompt "$PROMPT" --max-new "$MAX_NEW"
+    else
+      set -- --prompt "$PROMPT"
+    fi
   else
-    set -- --chat --max-new "$MAX_NEW" "$@"
+    if [ -n "$MAX_NEW" ]; then
+      set -- --chat --max-new "$MAX_NEW" "$@"
+    else
+      set -- --chat "$@"
+    fi
   fi
 fi
 
@@ -49,11 +58,9 @@ exec env LD_LIBRARY_PATH="$LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
   PYTHONPATH="$PYTHONPATH_VALUE${PYTHONPATH:+:$PYTHONPATH}" \
   "$PYTHON_BIN" -u "$APP_DIR/src/merged_board_server.py" \
     --persistent-executor "$APP_DIR/bin/pico_persistent_acl_executor.aarch64" \
-    --decode-model "$ROOT/models/decode.om" \
-    --prefill-model "$ROOT/models/prefill.om" \
-    --head-model "$ROOT/models/head_flat.om" \
+    --profile "$PROFILE" \
+    --deployment-root "$ROOT" \
     --library-path "$LIB" \
     --embedding "$ROOT/assets/token_embedding.f16.bin" \
     --tokenizer "$ROOT/assets/tokenizer.json" \
-    --context 1024 \
     "$@"

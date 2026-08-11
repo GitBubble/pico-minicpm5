@@ -71,7 +71,9 @@
       "sha256": "b58b5c2715154f8f7051d2d8fd111af41bb3cd318dbd3be86a60a0ac9a842230",
       "distribution": "runtime-archive-only"
     },
-    "board_runner_sha256": "01c8d4e777301be0b1d4be94f8970c7ca125f343028756854e1d80b39ff68ea9",
+    "board_runner_sha256": "e07373f638e19785247b29f1b6afd77a02c6e9f69c444b0891057ef2008e6a24",
+    "agent_sha256": "e6ea0e7964a3b7b6fba4ccc83336a02fb67a0acdaf7577fa00229f4cc3bd9cb6",
+    "profile_loader_sha256": "e87e14324db124fe18caa2add0c335d0384155cf6f709b60cb4a081475e2e708",
     "resident_kv": true,
     "tokens_per_second_range": [9.423795766669281, 9.475671622659606]
   },

@@ -55,3 +55,23 @@ other tool selection remains model-native.
 `agent.sh` now provides Linux-style `/help [COMMAND]` output. The full page
 documents every local command, aliases, permission scope and numeric ranges;
 topic help such as `/help max` shows the detailed syntax and effective limits.
+
+## Agent routing and context profiles — 2026-08-11
+
+The application now separates local commands, deterministic direct tools,
+tool-then-model work and model-only requests. An unambiguous directory listing
+uses `DIRECT_TOOL`, displays the typed tool result and explicitly reports
+`model skipped`; no tool schema, prompt replay or MiniCPM generation is spent
+on that request. A board measurement recorded `4.3 ms` tool time (`12.2 ms`
+resident request time); the surrounding one-shot process still spent about
+`10.8 s` loading the three model handles. Reports now expose route mode/reason,
+route time, tool time, whether the model ran and total time.
+
+Runtime profiles bind context, models, capabilities, generation limits and
+numeric policy. The final matrix is ctx128 Chat-only, ctx1024 Chat+Agent,
+ctx4096 Chat+Agent and ctx8192 Chat+Agent. Only ctx1024 is qualified in this
+release. The other profiles are fail-closed `pending` declarations until their
+exact OM sets pass descriptor, public-output cosine strictly greater than
+`0.98`, greedy-token and board gates. Agent mode rejects ctx128 before loading
+any model. At startup, the runtime also checks that mask/RoPE/K/V descriptor
+geometry exactly matches the selected context.

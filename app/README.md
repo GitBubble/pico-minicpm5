@@ -16,10 +16,15 @@ Python package is needed.
 │   ├── agent.sh
 │   ├── bin/pico_persistent_acl_executor.aarch64
 │   ├── native/{Makefile,pico_persistent_acl_executor.c}
+│   ├── profiles/{ctx128,ctx1024,ctx4096,ctx8192}.json
 │   └── src/{merged_board_server.py,minicpm_agent.py,
+│            minicpm_profile.py,
 │            pico_minicpm5_split_board_runner.py,probe_om_execute_latency.py,
 │            qualify_minicpm_greedy_chain.py}
-├── models/{prefill.om,decode.om,head_flat.om}
+├── models/{prefill.om,decode.om,head_flat.om}          # qualified ctx1024
+├── models/ctx128/{prefill.om,decode.om}                # when qualified
+├── models/ctx4096/{prefill.om,decode.om}               # when qualified
+├── models/ctx8192/{prefill.om,decode.om}               # when qualified
 └── assets/{token_embedding.f16.bin,tokenizer.json}
 ```
 
@@ -38,6 +43,10 @@ chmod +x app/chat.sh app/agent.sh app/bin/pico_persistent_acl_executor.aarch64
 
 # Native tool-calling agent. The three handles load only once.
 ./app/agent.sh
+
+# Explicit profile selection. ctx128 is chat-only.
+./app/chat.sh --profile ctx128
+./app/agent.sh --profile ctx4096
 ```
 
 ```text
@@ -57,7 +66,7 @@ MiniCPM ✦ ...
 You ❯ /quit
 ```
 
-Both board applications default to `ctx1024`. `chat.sh` uses the official
+Both board applications default to the qualified `ctx1024` profile. `chat.sh` uses the official
 MiniCPM5 chat template without tool definitions and retains conversation
 history until `/clear`. `agent.sh` adds the native tool protocol described
 below.
@@ -79,19 +88,21 @@ the registry, policy and token budget.
 | Command | Purpose and scope |
 |---|---|
 | `/help [COMMAND]` | List every local command or explain one command. |
+| `/profile` | Show the runtime profile, context and capability; switching requires restart. |
 | `/tools` | Show registered native tools without executing them. |
 | `/permissions` | Show which tools are automatic and which require approval. |
 | `/think [on\|off]` | Query or change thinking for subsequent Agent generations. |
-| `/context` | Show ctx1024 prompt usage, including tools and history. |
+| `/context` | Show the selected profile's prompt usage, including tools and history. |
 | `/clear` | Clear conversation/tool history without reloading model handles; `/reset` is an alias. |
-| `/max [N]` | Query or set the response limit; ctx1024 accepts integer `N=1..1023`, further limited by remaining context. |
+| `/max [N]` | Query or set the profile response limit, further limited by remaining context. |
 | `/quit` | Close the resident session; `/exit` and Ctrl-D are equivalent. |
 
 The agent knows the configured workspace root and uses `path='.'` for it, so it
 must inspect available paths rather than ask the user for the current directory.
 Unambiguous directory-listing requests are routed directly to the read-only
-`list_directory` tool; general tool selection remains model-native.
-Because this release is ctx1024, tool responses are capped at 800 characters;
+`list_directory` tool and displayed with `model skipped`; general tool
+selection remains model-native. The qualified ctx1024 profile caps tool
+responses at 800 characters;
 directory, file and search defaults are deliberately small and can be narrowed
 or paged with a follow-up call.
 
@@ -102,9 +113,9 @@ next generation without reloading the three models. Thinking tokens consume
 the same ctx1024 budget as tool definitions, history and the final answer.
 
 A timed activity indicator covers model loading and time-to-first-token, then
-the final answer streams token by token. The default
-response limit is 128 tokens; `/max N` displays or
-changes it without restarting the models. For ctx1024, `N` may be 1–1023;
+the final answer streams token by token. The ctx1024 default response limit is
+128 tokens; `/max N` displays or changes the active profile limit without
+restarting the models. For ctx1024, `N` may be 1–1023;
 the effective output also depends on tool definitions, prompt, history and
 tool results. Older completed turns are cleared when needed; a turn gets at
 most four tool rounds by default.
@@ -148,7 +159,8 @@ recognize these environment overrides:
 | `PYTHON` | auto-detect | Python executable |
 | `TOKENIZERS` | empty | Optional extra `site-packages` path |
 | `PROMPT` | unset | Optional one-shot prompt; unset starts REPL |
-| `MAX_NEW` | `128` | Initial maximum generated tokens |
+| `PICO_PROFILE` | `ctx1024` | Runtime profile selected before model loading |
+| `MAX_NEW` | profile default | Optional initial maximum generated tokens |
 | `THINKING` | `0` | `agent.sh` startup thinking: `0/1`, `off/on`, `false/true` |
 | `PICO_MINICPM5_COLOR` | `auto` | `auto`, `always` or `never` |
 | `NO_COLOR` | unset | Disable ANSI colour while in auto mode |
@@ -177,6 +189,12 @@ libraries. The supplied executor is AArch64; its source and Makefile are under
 cd /opt/pico-minicpm5/app/native
 make SDK_ROOT=/path/to/sdk/smp/a55_linux/mpp/out CC=aarch64-mix210-linux-gcc
 ```
+
+The runtime-profile and hybrid-routing contract is documented in the source
+repository's [Agent routing and runtime-context profile design](https://github.com/GitBubble/pico-minicpm5/blob/main/docs/AGENT_ROUTING_AND_CONTEXT_PROFILES.md).
+ctx128 is deliberately chat-only. ctx4096 and ctx8192 remain pending until
+their exact OM sets pass descriptor, numeric (`>0.98`) and board gates;
+controlled development requires the explicit `--allow-unqualified-profile`.
 
 The optimized ctx1024 release measured `105.5–106.1 ms/token`, or
 `9.42–9.48 token/s`, with 48/48 greedy tokens exact.

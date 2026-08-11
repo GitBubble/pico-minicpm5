@@ -25,9 +25,9 @@ IM_END = "<|im_end|>"
 BOS = "<s>"
 TOOL_RESPONSE_OPEN = "<tool_response>"
 TOOL_RESPONSE_CLOSE = "</tool_response>"
-# The deployed model has a ctx1024 contract. Tool results must leave room for
-# the schemas, call, conversation and final response; callers can request a
-# narrower follow-up window when more data is needed.
+# Default tool budget for legacy ctx1024 launches. Runtime profiles may supply
+# a different bound; every profile must leave room for the schema, call,
+# conversation and final response.
 MAX_TOOL_OUTPUT_CHARS = 800
 
 
@@ -80,6 +80,17 @@ class StableTextStream:
 class ToolCall:
     name: str
     arguments: dict[str, str]
+
+
+@dataclass(frozen=True)
+class RouteDecision:
+    mode: str
+    confidence: float
+    tool_calls: tuple[ToolCall, ...]
+    response_policy: str
+    schema_profile: str
+    permission: str
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -255,7 +266,7 @@ _ABSOLUTE_PATH = re.compile(r"(/[^\s，。！？；]*)")
 
 def route_obvious_read_only(
     user_text: str, previous_assistant: str = "",
-) -> ToolCall | None:
+) -> RouteDecision | None:
     """Route only unambiguous directory-listing intents without an LLM.
 
     MiniCPM5 remains the general tool selector.  This narrow fallback covers
@@ -281,7 +292,11 @@ def route_obvious_read_only(
         return None
     if root_shortcut and path_match is None:
         path = "/root"
-    return ToolCall("list_directory", {"path": path, "max_entries": "10"})
+    call = ToolCall("list_directory", {"path": path, "max_entries": "10"})
+    return RouteDecision(
+        mode="DIRECT_TOOL", confidence=0.99, tool_calls=(call,),
+        response_policy="DIRECT_FORMATTED", schema_profile="none",
+        permission="automatic", reason="explicit directory listing request")
 
 
 def format_tool_call(call: ToolCall) -> str:
@@ -305,10 +320,13 @@ def _integer(arguments: dict[str, str], name: str, default: int,
 class WorkspaceTools:
     """Workspace-confined tools with explicit approval for mutation/shell."""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, *, max_output_chars: int = MAX_TOOL_OUTPUT_CHARS):
         self.root = root.expanduser().resolve()
         if not self.root.is_dir():
             raise ValueError(f"agent workspace is not a directory: {self.root}")
+        if type(max_output_chars) is not int or max_output_chars < 64:
+            raise ValueError("max_output_chars must be an integer >= 64")
+        self.max_output_chars = max_output_chars
         obj = {"type": "object", "additionalProperties": False}
         self._tools = {
             tool.name: tool for tool in (
@@ -371,11 +389,10 @@ class WorkspaceTools:
             raise ToolExecutionError("writing through a symlink is forbidden")
         return resolved
 
-    @staticmethod
-    def _clip(value: str) -> str:
-        if len(value) <= MAX_TOOL_OUTPUT_CHARS:
+    def _clip(self, value: str) -> str:
+        if len(value) <= self.max_output_chars:
             return value
-        return value[:MAX_TOOL_OUTPUT_CHARS] + "\n...[tool output truncated]"
+        return value[:self.max_output_chars] + "\n...[tool output truncated]"
 
     def preview(self, call: ToolCall) -> str:
         shown = []
@@ -416,6 +433,33 @@ class WorkspaceTools:
         status = "succeeded" if result["ok"] else "failed"
         output = str(result["output"]).replace("<", "\\u003c")
         return f"Tool {result['tool']} {status}.\n{output}"
+
+    @staticmethod
+    def for_direct(call: ToolCall, result_json: str) -> str:
+        """Render an audited result without invoking MiniCPM5."""
+        result = json.loads(result_json)
+
+        def terminal_safe(value: str) -> str:
+            rendered = []
+            for character in value:
+                code = ord(character)
+                if character == "\n":
+                    rendered.append(character)
+                elif code < 32 or code == 127:
+                    rendered.append(f"\\x{code:02x}")
+                else:
+                    rendered.append(character)
+            return "".join(rendered)
+
+        output = terminal_safe(str(result["output"]))
+        if not result["ok"]:
+            return f"{call.name} 失败：{output}"
+        if call.name == "list_directory":
+            path = terminal_safe(call.arguments.get("path", "."))
+            lines = output.splitlines() or ["[empty directory]"]
+            return f"目录内容（{path}）：\n" + "\n".join(
+                f"  {line}" for line in lines)
+        return output
 
     def _list_directory(self, arguments: dict[str, str]) -> str:
         path = self._path(arguments.get("path", "."))

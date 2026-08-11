@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import builtins
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
+
+import pytest
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -142,7 +145,7 @@ def test_agent_repl_executes_native_tool_call(monkeypatch, capsys, tmp_path) -> 
     assert "thinking=on" in output
     assert "MiniCPM Agent 内置命令" in output
     assert "/help [COMMAND]" in output
-    assert "N 必须为整数 1..1023；当前为 128" in output
+    assert "配置范围 1..1023，硬件范围 1..1023；当前为 128" in output
     assert "未知帮助主题: nonsense" in output
     assert "<tool_response>" in rendered_prompts[1]
     assert "hello from tool" in rendered_prompts[1]
@@ -166,7 +169,7 @@ def test_agent_help_describes_command_scope_and_ranges(tmp_path) -> None:
         max_tool_steps=4, workspace=tmp_path)
 
     for command in (
-            "/help", "/tools", "/permissions", "/think", "/context",
+            "/help", "/profile", "/tools", "/permissions", "/think", "/context",
             "/clear", "/max", "/quit"):
         assert command in overview
     assert "N=1..1023" in overview
@@ -174,6 +177,75 @@ def test_agent_help_describes_command_scope_and_ranges(tmp_path) -> None:
     assert str(tmp_path) in overview
     assert "write_file/run_shell 每次询问" in permissions
     assert "不会退出进程或重新加载三个模型句柄" in clear
+
+
+def test_agent_direct_directory_route_skips_model(
+        monkeypatch, capsys, tmp_path) -> None:
+    server = _server_module()
+    (tmp_path / "alpha.txt").write_text("alpha\n", encoding="utf-8")
+    (tmp_path / "folder").mkdir()
+    report = tmp_path / "report.json"
+
+    class Session:
+        models = [object(), object(), object()]
+        kv_slots = {0: (0, 1), 1: (0, 1)}
+        tokenizer = object()
+
+        def __init__(self, **_kwargs):
+            pass
+
+        def generate(self, *_args, **_kwargs):
+            raise AssertionError("direct tool route must not invoke MiniCPM5")
+
+        def close(self):
+            pass
+
+    prompts = iter(["列出目录文件", "/quit"])
+    monkeypatch.setattr(server, "Merged", Session)
+    monkeypatch.setattr(builtins, "input", lambda _prompt: next(prompts))
+    monkeypatch.setattr(sys, "argv", [
+        "merged_board_server.py", "--persistent-executor", "executor",
+        "--decode-model", "decode.om", "--prefill-model", "prefill.om",
+        "--head-model", "head.om", "--embedding", "embedding.bin",
+        "--tokenizer", "tokenizer.json", "--agent",
+        "--workspace", str(tmp_path), "--report", str(report),
+    ])
+
+    assert server.main() == 0
+
+    output = capsys.readouterr().out
+    assert "model skipped" in output
+    assert "目录内容（.）：" in output
+    assert "alpha.txt" in output and "folder/" in output
+    evidence = json.loads(report.read_text())["runs"][0]
+    assert evidence["reason"] == "tool_direct"
+    assert evidence["route_mode"] == "DIRECT_TOOL"
+    assert evidence["model_called"] is False
+    assert evidence["ids"] == [] and evidence["phase_ms"] == []
+    assert evidence["route_ms"] >= 0 and evidence["tool_ms"] >= 0
+
+
+def test_ctx128_profile_rejects_agent_before_loading_models(
+        monkeypatch, capsys, tmp_path) -> None:
+    server = _server_module()
+
+    class MustNotLoad:
+        def __init__(self, **_kwargs):
+            raise AssertionError("ctx128 capability gate must run before model load")
+
+    monkeypatch.setattr(server, "Merged", MustNotLoad)
+    monkeypatch.setattr(sys, "argv", [
+        "merged_board_server.py", "--persistent-executor", "executor",
+        "--profile", "ctx128", "--deployment-root", str(tmp_path),
+        "--embedding", "embedding.bin", "--tokenizer", "tokenizer.json",
+        "--agent", "--allow-unqualified-profile",
+    ])
+
+    with pytest.raises(SystemExit) as raised:
+        server.main()
+
+    assert raised.value.code == 2
+    assert "ctx128 is chat-only" in capsys.readouterr().err
 
 
 def test_chat_repl_uses_template_and_streams_split_cjk_once(
@@ -293,7 +365,15 @@ def test_merged_accepts_a_legacy_executor_launcher(monkeypatch, tmp_path) -> Non
         return FakeProcess()
 
     monkeypatch.setattr(server.probe, "_start", legacy_start)
-    monkeypatch.setattr(server.probe, "_read_ready", lambda *_args: [([], [])] * 2)
+    cache_bytes = 48 * 1023 * 128 * 2
+    transformer = (
+        [1536 * 16, 1024 * 4, 128 * 128 * 4,
+         cache_bytes, cache_bytes],
+        [48 * 128 * 4, 48 * 128 * 4, 1536 * 16],
+    )
+    monkeypatch.setattr(
+        server.probe, "_read_ready",
+        lambda *_args: [transformer, ([], [])])
     monkeypatch.setattr(server.Merged, "_identify_kv", lambda _self: {})
     embedding = tmp_path / "embedding.bin"
     embedding.write_bytes(b"")
@@ -305,6 +385,25 @@ def test_merged_accepts_a_legacy_executor_launcher(monkeypatch, tmp_path) -> Non
     session.embed.close()
 
     assert calls == [{"quiet": True}, {}]
+
+
+def test_merged_rejects_om_context_descriptor_mismatch() -> None:
+    server = _server_module()
+    session = object.__new__(server.Merged)
+    session.context = 4096
+    session.cache_bytes = 48 * 4095 * 128 * 2
+    session.decode_index = 0
+    session.prefill_index = 0
+    # This is a valid ctx1024 transformer's public input geometry.
+    ctx1024_cache = 48 * 1023 * 128 * 2
+    session.descriptors = [(
+        [1536 * 16, 1024 * 4, 128 * 128 * 4,
+         ctx1024_cache, ctx1024_cache],
+        [48 * 128 * 4, 48 * 128 * 4, 1536 * 16],
+    )]
+
+    with pytest.raises(RuntimeError, match="descriptor/context mismatch"):
+        session._validate_context_descriptors()
 
 
 def _fake_python(tmp_path: Path) -> Path:
@@ -331,7 +430,8 @@ def test_chat_and_agent_launchers_are_separate(tmp_path: Path) -> None:
     assert "--chat" in repl
     assert "--interactive" not in repl
     assert "--prompt" not in repl
-    assert repl[repl.index("--context") + 1] == "1024"
+    assert repl[repl.index("--profile") + 1] == "ctx1024"
+    assert repl[repl.index("--deployment-root") + 1] == str(tmp_path / "deploy")
 
     chat_with_options = subprocess.run(
         ["sh", str(script), "--no-spinner", "--color", "never"],
@@ -349,7 +449,15 @@ def test_chat_and_agent_launchers_are_separate(tmp_path: Path) -> None:
     assert "--chat" not in agent
     assert "--interactive" not in agent
     assert "--prompt" not in agent
-    assert agent[agent.index("--max-new") + 1] == "128"
+    assert agent[agent.index("--profile") + 1] == "ctx1024"
+    assert "--max-new" not in agent
+
+    ctx128 = environment.copy()
+    ctx128["PICO_PROFILE"] = "ctx128"
+    chat128 = subprocess.run(
+        ["sh", str(script)], env=ctx128, text=True,
+        capture_output=True, check=True).stdout.splitlines()
+    assert chat128[chat128.index("--profile") + 1] == "ctx128"
 
     thinking_environment = environment.copy()
     thinking_environment["THINKING"] = "on"

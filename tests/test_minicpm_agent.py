@@ -109,8 +109,12 @@ def test_parse_rejects_incomplete_or_duplicate_parameters() -> None:
 def test_route_obvious_directory_intent(
         query: str, previous: str, path: str) -> None:
     agent = _agent_module()
-    call = agent.route_obvious_read_only(query, previous)
+    decision = agent.route_obvious_read_only(query, previous)
 
+    assert decision is not None
+    assert decision.mode == "DIRECT_TOOL"
+    assert decision.response_policy == "DIRECT_FORMATTED"
+    call = decision.tool_calls[0]
     assert call == agent.ToolCall(
         "list_directory", {"path": path, "max_entries": "10"})
     assert agent.parse_tool_calls(agent.format_tool_call(call))[0] == [call]
@@ -158,6 +162,10 @@ def test_default_tool_results_fit_ctx1024_budget(tmp_path: Path) -> None:
     model_result = tools.for_model(listing)
     assert model_result.startswith("Tool list_directory succeeded.\n")
     assert "\\n" not in model_result
+    direct_result = tools.for_direct(
+        agent.ToolCall("list_directory", {"path": "."}), listing)
+    assert direct_result.startswith("目录内容（.）：\n")
+    assert "very_long_generated_entry_name_000" in direct_result
 
 
 def test_mutating_tools_require_approval_and_escape_results(tmp_path: Path) -> None:

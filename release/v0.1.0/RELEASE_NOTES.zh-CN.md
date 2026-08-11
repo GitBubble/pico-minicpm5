@@ -42,3 +42,19 @@ Agent 提示现明确将 `.` 绑定到配置的 workspace，要求直接使用�
 `agent.sh` 新增 Linux 命令行风格的 `/help [COMMAND]`：总览会列出每个本地
 命令、别名、权限作用域和数值范围，`/help max` 等主题帮助则显示详细语法与
 实际限制。
+
+## Agent 路由与 Context Profile — 2026-08-11
+
+应用现将本地命令、确定性直接工具、工具后模型总结和纯模型请求分离。明确的列
+目录请求走 `DIRECT_TOOL`，直接展示类型化结果并显示 `model skipped`，不会为该
+请求注入工具 schema、重放 prompt 或调用 MiniCPM。板端实测工具执行约
+`4.3 ms`，常驻请求总耗时约 `12.2 ms`；单次启动命令外围仍有约 `10.8 s` 的三
+句柄冷加载成本。报告新增 route mode/reason、route/tool/total 耗时和
+`model_called` 证据。
+
+runtime profile 将 context、模型产物、能力、生成限制和数值策略绑定为一个合同。
+最终矩阵为：ctx128 仅 Chat；ctx1024、ctx4096、ctx8192 支持 Chat+Agent。本
+Release 只有 ctx1024 已验收；其它 profile 在对应 OM 通过 descriptor、公开输出
+cosine 严格大于 `0.98`、greedy token 和板端门禁前保持 fail-closed `pending`。
+Agent 选择 ctx128 会在模型加载前拒绝。运行时启动时还会检查 mask/RoPE/K/V
+descriptor 几何与所选 context 完全一致。

@@ -52,3 +52,6 @@ filesystem inspection instead of asking the user for a current path. Compact
 800-character tool results preserve enough ctx1024 budget for a final answer.
 Unambiguous listing requests have a read-only deterministic route while all
 other tool selection remains model-native.
+`agent.sh` now provides Linux-style `/help [COMMAND]` output. The full page
+documents every local command, aliases, permission scope and numeric ranges;
+topic help such as `/help max` shows the detailed syntax and effective limits.

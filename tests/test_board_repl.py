@@ -120,7 +120,8 @@ def test_agent_repl_executes_native_tool_call(monkeypatch, capsys, tmp_path) -> 
             pass
 
     prompts = iter([
-        "/think", "/think on", "Please read note.txt", "/think off", "/quit"])
+        "/help", "/help max", "/help nonsense", "/think", "/think on",
+        "Please read note.txt", "/think off", "/quit"])
     monkeypatch.setattr(server, "Merged", Session)
     monkeypatch.setattr(builtins, "input", lambda _prompt: next(prompts))
     monkeypatch.setattr(sys, "argv", [
@@ -139,12 +140,40 @@ def test_agent_repl_executes_native_tool_call(monkeypatch, capsys, tmp_path) -> 
     assert "MiniCPM ✦ The note says hello from tool." in output
     assert "thinking=off" in output
     assert "thinking=on" in output
+    assert "MiniCPM Agent 内置命令" in output
+    assert "/help [COMMAND]" in output
+    assert "N 必须为整数 1..1023；当前为 128" in output
+    assert "未知帮助主题: nonsense" in output
     assert "<tool_response>" in rendered_prompts[1]
     assert "hello from tool" in rendered_prompts[1]
     assert "Use path='.' for that root" in rendered_prompts[0]
     assert str(tmp_path) in rendered_prompts[0]
     assert rendered_prompts[0].endswith(
         "<|im_start|>assistant\n<think>\n")
+
+
+def test_agent_help_describes_command_scope_and_ranges(tmp_path) -> None:
+    server = _server_module()
+
+    overview = server.agent_command_help(
+        "", context=1024, max_new=128, thinking=False, max_tool_steps=4,
+        workspace=tmp_path)
+    permissions = server.agent_command_help(
+        "/permissions", context=1024, max_new=128, thinking=False,
+        max_tool_steps=4, workspace=tmp_path)
+    clear = server.agent_command_help(
+        "reset", context=1024, max_new=128, thinking=False,
+        max_tool_steps=4, workspace=tmp_path)
+
+    for command in (
+            "/help", "/tools", "/permissions", "/think", "/context",
+            "/clear", "/max", "/quit"):
+        assert command in overview
+    assert "N=1..1023" in overview
+    assert "每个用户请求最多 4 轮工具调用" in overview
+    assert str(tmp_path) in overview
+    assert "write_file/run_shell 每次询问" in permissions
+    assert "不会退出进程或重新加载三个模型句柄" in clear
 
 
 def test_chat_repl_uses_template_and_streams_split_cjk_once(

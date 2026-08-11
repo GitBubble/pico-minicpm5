@@ -50,6 +50,110 @@ HIDDEN, KV_HEADS, HEAD_DIM, LAYERS = gc.HIDDEN, gc.KV_HEADS, gc.HEAD_DIM, gc.LAY
 CHANNELS = LAYERS * KV_HEADS
 
 
+def agent_command_help(topic, *, context, max_new, thinking, max_tool_steps,
+                       workspace):
+    """Return Linux-style help for the agent's local REPL commands."""
+    canonical = str(topic or "").strip().lower().lstrip("/")
+    aliases = {"exit": "quit", "reset": "clear"}
+    canonical = aliases.get(canonical, canonical)
+    maximum = int(context) - 1
+    state = "on" if thinking else "off"
+    command_names = "help|tools|permissions|think|context|clear|max|quit"
+
+    details = {
+        "help": (
+            "NAME\n"
+            "  /help - 显示 Agent 内置命令帮助\n\n"
+            "SYNOPSIS\n"
+            "  /help\n"
+            "  /help COMMAND\n\n"
+            "SCOPE\n"
+            "  COMMAND 可写为 max 或 /max；不带参数时列出全部命令。"),
+        "tools": (
+            "NAME\n"
+            "  /tools - 列出当前 Agent 注册的原生工具\n\n"
+            "SYNOPSIS\n"
+            "  /tools\n\n"
+            "SCOPE\n"
+            f"  仅查看工具名，不执行工具；文件工具限制在 workspace {workspace}。"),
+        "permissions": (
+            "NAME\n"
+            "  /permissions - 显示工具授权策略\n\n"
+            "SYNOPSIS\n"
+            "  /permissions\n\n"
+            "SCOPE\n"
+            "  list/read/search/git 自动执行；write_file/run_shell 每次询问，默认拒绝。"),
+        "think": (
+            "NAME\n"
+            "  /think - 查看或切换模型 thinking\n\n"
+            "SYNOPSIS\n"
+            "  /think\n"
+            "  /think on|off\n\n"
+            "RANGE\n"
+            f"  on 或 off；当前为 {state}。切换只影响后续生成并占用同一 ctx{context}。"),
+        "context": (
+            "NAME\n"
+            "  /context - 查看当前 prompt 的上下文 token 用量\n\n"
+            "SYNOPSIS\n"
+            "  /context\n\n"
+            "SCOPE\n"
+            f"  总容量固定为 ctx{context}，统计包含系统提示、工具定义和会话历史。"),
+        "clear": (
+            "NAME\n"
+            "  /clear - 清空对话及工具历史\n\n"
+            "SYNOPSIS\n"
+            "  /clear\n"
+            "  /reset\n\n"
+            "SCOPE\n"
+            "  仅重置当前会话上下文；不会退出进程或重新加载三个模型句柄。"),
+        "max": (
+            "NAME\n"
+            "  /max - 查看或设置单次回答的生成 token 上限\n\n"
+            "SYNOPSIS\n"
+            "  /max\n"
+            "  /max N\n\n"
+            "RANGE\n"
+            f"  N 必须为整数 1..{maximum}；当前为 {max_new}。实际输出还受剩余上下文限制。"),
+        "quit": (
+            "NAME\n"
+            "  /quit - 退出 Agent REPL\n\n"
+            "SYNOPSIS\n"
+            "  /quit\n"
+            "  /exit\n"
+            "  Ctrl-D\n\n"
+            "SCOPE\n"
+            "  关闭当前常驻会话及模型句柄；不会修改 workspace 文件。"),
+    }
+    if canonical:
+        if canonical in details:
+            return details[canonical]
+        return (
+            f"未知帮助主题: {topic}\n"
+            f"用法: /help [{command_names}]")
+
+    return (
+        "MiniCPM Agent 内置命令\n\n"
+        "用法:\n"
+        "  /help [COMMAND]\n\n"
+        "命令:\n"
+        "  /help [COMMAND]  显示全部帮助，或查看一个命令的详细说明\n"
+        "  /tools           列出原生工具；只查看，不执行\n"
+        "  /permissions     显示自动执行与逐次授权范围\n"
+        f"  /think [on|off]  查看或切换 thinking（当前 {state}）\n"
+        f"  /context         显示 ctx{context} prompt token 用量\n"
+        "  /clear           清空对话和工具历史；别名 /reset\n"
+        f"  /max [N]         查看或设置生成上限，N=1..{maximum}（当前 {max_new}）\n"
+        "  /quit            退出；别名 /exit，也可按 Ctrl-D\n\n"
+        "范围:\n"
+        f"  workspace: {workspace}\n"
+        f"  每个用户请求最多 {max_tool_steps} 轮工具调用。\n"
+        "  上述命令由本地 REPL 处理，不发送给模型。\n\n"
+        "详细帮助:\n"
+        "  /help max       查看 /max 的参数范围\n"
+        "  /help think     查看 thinking 的作用域\n"
+        "  /help permissions")
+
+
 class TerminalUI:
     """Small dependency-free terminal UI for the resident board REPL.
 
@@ -674,14 +778,13 @@ def main() -> int:
                     continue
                 if spec in {"/quit", "/exit"}:
                     break
-                if spec == "/help":
-                    ui.info(
-                        "Native MiniCPM5 XML tool calling is enabled. "
-                        f"ctx{args.context}; max-new={repl_max_new}; "
-                        f"thinking={'on' if thinking_enabled else 'off'}; "
-                        f"tool rounds=1..{args.max_tool_steps}. Commands: "
-                        "/tools, /think on|off, /context, /clear, /max N, "
-                        "/permissions, /quit.")
+                if spec == "/help" or spec.startswith("/help "):
+                    topic = spec[5:].strip()
+                    ui.info(agent_command_help(
+                        topic, context=args.context, max_new=repl_max_new,
+                        thinking=thinking_enabled,
+                        max_tool_steps=args.max_tool_steps,
+                        workspace=workspace_tools.root))
                     continue
                 if spec == "/tools":
                     ui.info("Tools: " + ", ".join(workspace_tools.names))

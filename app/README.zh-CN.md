@@ -69,6 +69,20 @@ template，并保留多轮历史直至 `/clear`；`agent.sh` 再加入下面描�
 `--workspace PATH` 显式指定边界。`/tools`、`/permissions` 和 `/context` 分别
 显示工具、权限和 token 预算。
 
+`/help` 会按 Linux 命令行风格列出命令的语法、参数范围与作用域；使用
+`/help COMMAND`（例如 `/help max`）可查看单个命令的详细说明。
+
+| 命令 | 用途与使用范围 |
+|---|---|
+| `/help [COMMAND]` | 列出全部本地命令，或查看一个命令的详细帮助。 |
+| `/tools` | 只显示已注册的原生工具，不执行工具。 |
+| `/permissions` | 显示哪些工具自动执行、哪些工具需要逐次授权。 |
+| `/think [on\|off]` | 查看或切换后续 Agent 生成的 thinking。 |
+| `/context` | 显示 ctx1024 的 prompt 用量，包含工具定义和会话历史。 |
+| `/clear` | 清空对话和工具历史但不重载模型句柄；`/reset` 是别名。 |
+| `/max [N]` | 查看或设置回答上限；ctx1024 接受整数 `N=1..1023`，实际仍受剩余上下文限制。 |
+| `/quit` | 关闭常驻会话；`/exit` 和 Ctrl-D 等价。 |
+
 Agent 已知配置的 workspace 根目录，并以 `path='.'` 表示该目录，因此应主动
 调用工具检查，而不是向用户追问当前路径。明确的目录列举请求会直接路由到只读
 `list_directory`；其他工具仍由模型原生选择。由于本交付固定 ctx1024，单次工具结果

@@ -73,6 +73,20 @@ tools are confined to the startup working directory; use `--workspace PATH`
 to set an explicit boundary. `/tools`, `/permissions` and `/context` display
 the registry, policy and token budget.
 
+`/help` prints Linux-style command help with syntax, ranges and scope. Use
+`/help COMMAND` (for example, `/help max`) for the detailed form.
+
+| Command | Purpose and scope |
+|---|---|
+| `/help [COMMAND]` | List every local command or explain one command. |
+| `/tools` | Show registered native tools without executing them. |
+| `/permissions` | Show which tools are automatic and which require approval. |
+| `/think [on\|off]` | Query or change thinking for subsequent Agent generations. |
+| `/context` | Show ctx1024 prompt usage, including tools and history. |
+| `/clear` | Clear conversation/tool history without reloading model handles; `/reset` is an alias. |
+| `/max [N]` | Query or set the response limit; ctx1024 accepts integer `N=1..1023`, further limited by remaining context. |
+| `/quit` | Close the resident session; `/exit` and Ctrl-D are equivalent. |
+
 The agent knows the configured workspace root and uses `path='.'` for it, so it
 must inspect available paths rather than ask the user for the current directory.
 Unambiguous directory-listing requests are routed directly to the read-only

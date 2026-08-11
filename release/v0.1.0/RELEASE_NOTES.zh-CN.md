@@ -25,3 +25,8 @@ runtime 新增常驻 stdin REPL。无参数运行 `app/chat.sh` 只加载一次�
 原有单次 `--prompt` 用法保持兼容。
 REPL 回答现在会随 token 生成逐步显示，默认上限为 128 token，并支持
 `/max N`。达到回答或 ctx 上限时会显式提示，不再静默截断。
+
+原生 MiniCPM5 工具调用 Agent 由独立的 `app/agent.sh` 提供。运行时复用官方 chat template
+的 `<tools>/<function>/<param>/<tool_response>` 合同，支持多轮工具回填、会话历史、
+工作区边界和每次确认的写入/shell 权限。`app/chat.sh` 保持纯对话 REPL，单次
+`--prompt` 路径继续保留。

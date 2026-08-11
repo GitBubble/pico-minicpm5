@@ -13,10 +13,12 @@ Python package is needed.
 /opt/pico-minicpm5/
 ├── app/
 │   ├── chat.sh
+│   ├── agent.sh
 │   ├── bin/pico_persistent_acl_executor.aarch64
 │   ├── native/{Makefile,pico_persistent_acl_executor.c}
-│   └── src/{merged_board_server.py,pico_minicpm5_split_board_runner.py,
-│            probe_om_execute_latency.py,qualify_minicpm_greedy_chain.py}
+│   └── src/{merged_board_server.py,minicpm_agent.py,
+│            pico_minicpm5_split_board_runner.py,probe_om_execute_latency.py,
+│            qualify_minicpm_greedy_chain.py}
 ├── models/{prefill.om,decode.om,head_flat.om}
 └── assets/{token_embedding.f16.bin,tokenizer.json}
 ```
@@ -29,10 +31,13 @@ part of this repository.
 
 ```bash
 cd /opt/pico-minicpm5
-chmod +x app/chat.sh app/bin/pico_persistent_acl_executor.aarch64
+chmod +x app/chat.sh app/agent.sh app/bin/pico_persistent_acl_executor.aarch64
 
-# Start the resident REPL. The three model handles load only once.
+# Plain conversational REPL.
 ./app/chat.sh
+
+# Native tool-calling agent. The three handles load only once.
+./app/agent.sh
 ```
 
 ```text
@@ -43,28 +48,39 @@ chmod +x app/chat.sh app/bin/pico_persistent_acl_executor.aarch64
 
 ⠹ Loading three resident model handles  6.4s
 ✓ ready · loaded 3 handles · ctx1024 · 10.2s
-Commands: /help · /max N · /reset · /quit
-You ❯ The capital of France is
-⠴ MiniCPM is thinking  0.8s
-MiniCPM ✦  Paris, ...
+Agent ready · /help · /tools · /context · /clear · /quit
+You ❯ Read the first 20 lines of README.md and summarize the project.
+⠴ Planning  0.8s
+⚙ read_file(path='README.md', start_line='1', end_line='20')
+✓ read_file: 1: # pico-minicpm5
+MiniCPM ✦ ...
 You ❯ /quit
 ```
 
-The board demo defaults to `ctx1024`. Each REPL prompt starts a fresh logical
-ctx1024 sequence; the model handles,
-executor process and allocated device buffers stay resident. This avoids the
-roughly 10-second model reload between questions. A timed activity indicator
-covers model loading and time-to-first-token, then output streams token by
-token; a compact token/rate/stop summary follows each turn. The default
+The board demo defaults to `ctx1024` and the official MiniCPM5 chat template.
+Tool definitions are rendered inside `<tools>`, the model emits its trained
+`<function>/<param>` XML, and results return through `<tool_response>`. The
+agent retains conversation/tool history until `/clear`; model handles,
+executor and device buffers remain resident.
+
+Built-ins are `list_directory`, `read_file`, `search_text`, `git_status`,
+`write_file` and `run_shell`. The first four run automatically. Writes and
+shell commands prompt `Allow once? [y/N]` every time and default to deny. File
+tools are confined to the startup working directory; use `--workspace PATH`
+to set an explicit boundary. `/tools`, `/permissions` and `/context` display
+the registry, policy and token budget.
+
+A timed activity indicator covers model loading and time-to-first-token, then
+the final answer streams token by token. The default
 response limit is 128 tokens; `/max N` displays or
 changes it without restarting the models. For ctx1024, `N` may be 1–1023;
-the effective output also depends on prompt length. `/reset` marks a new
-transcript in an optional JSON report. The current REPL is independent-turn
-completion, not a chat-template conversation-history implementation.
+the effective output also depends on tool definitions, prompt, history and
+tool results. Older completed turns are cleared when needed; a turn gets at
+most four tool rounds by default.
 
 Colour and animation are enabled only on an interactive terminal. Redirected,
 piped and log output automatically remains stable plain text. Use
-`NO_COLOR=1 ./app/chat.sh` to disable colour, or pass `--no-spinner` to disable
+`NO_COLOR=1 ./app/agent.sh` to disable colour, or pass `--no-spinner` to disable
 animation. `--color always|never|auto` and `PICO_MINICPM5_COLOR` explicitly
 select the colour policy. The REPL hides low-level executor loading logs by
 default; pass `--verbose-executor` when debugging them.
@@ -81,8 +97,11 @@ For a single non-interactive prompt:
 ./app/chat.sh --prompt '1+1 equals' --max-new 16
 ```
 
-`chat.sh` accepts extra server arguments after the script name and recognizes
-these environment overrides:
+These `--prompt` examples retain the raw-completion path. With no arguments,
+`chat.sh` starts the plain prompt REPL and `agent.sh` starts the native agent.
+
+Both launchers accept extra server arguments after the script name and
+recognize these environment overrides:
 
 | Variable | Default | Purpose |
 |---|---|---|

@@ -34,3 +34,9 @@ without arguments loads the three handles once and accepts repeated prompts;
 compatible. REPL responses now stream as tokens are generated, default to a
 128-token limit and support `/max N`; reaching the response or context limit
 is reported explicitly instead of silently truncating text.
+
+Tool calling is exposed as a separate `app/agent.sh` application. It
+uses the official `<tools>/<function>/<param>/<tool_response>` chat contract,
+supports multi-step tool feedback and conversation history, confines file
+tools to a workspace, and asks before every write or shell command. `chat.sh`
+remains the plain conversational REPL, and one-shot `--prompt` stays available.

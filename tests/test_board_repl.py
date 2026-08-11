@@ -80,6 +80,66 @@ def test_repl_reuses_one_session_and_handles_commands(monkeypatch, capsys) -> No
     assert "allowed range is 1..1023" in output
 
 
+def test_agent_repl_executes_native_tool_call(monkeypatch, capsys, tmp_path) -> None:
+    server = _server_module()
+    (tmp_path / "note.txt").write_text("hello from tool\n", encoding="utf-8")
+    rendered_prompts = []
+    generated = [
+        '<function name="read_file"><param name="path">note.txt</param>'
+        '</function><|im_end|>',
+        "The note says hello from tool.<|im_end|>",
+    ]
+
+    class Tokenizer:
+        def encode(self, text, add_special_tokens=False):
+            assert not add_special_tokens
+            rendered_prompts.append(text)
+            return SimpleNamespace(ids=[0, 130072, 42, 130073])
+
+        def decode(self, ids, skip_special_tokens=True):
+            assert not skip_special_tokens
+            return generated[int(ids[0]) - 100]
+
+    class Session:
+        models = [object(), object(), object()]
+        kv_slots = {0: (0, 1), 1: (0, 1)}
+        tokenizer = Tokenizer()
+        last_phase_steps = []
+
+        def __init__(self, **_kwargs):
+            pass
+
+        def generate(self, ids, *_args, **kwargs):
+            index = 100 + (len(rendered_prompts) - 1)
+            self.last_phase_steps = [{"position": 0}]
+            if kwargs.get("on_token") is not None:
+                kwargs["on_token"]((index,))
+            return "eos", [index], [1.0] * (len(ids) + 1)
+
+        def close(self):
+            pass
+
+    prompts = iter(["Please read note.txt", "/quit"])
+    monkeypatch.setattr(server, "Merged", Session)
+    monkeypatch.setattr(builtins, "input", lambda _prompt: next(prompts))
+    monkeypatch.setattr(sys, "argv", [
+        "merged_board_server.py", "--persistent-executor", "executor",
+        "--decode-model", "decode.om", "--prefill-model", "prefill.om",
+        "--head-model", "head.om", "--embedding", "embedding.bin",
+        "--tokenizer", "tokenizer.json", "--agent",
+        "--workspace", str(tmp_path),
+    ])
+
+    assert server.main() == 0
+
+    output = capsys.readouterr().out
+    assert "⚙ read_file(path='note.txt')" in output
+    assert "✓ read_file: 1: hello from tool" in output
+    assert "MiniCPM ✦ The note says hello from tool." in output
+    assert "<tool_response>" in rendered_prompts[1]
+    assert "hello from tool" in rendered_prompts[1]
+
+
 def test_terminal_ui_color_can_be_forced(monkeypatch, capsys) -> None:
     server = _server_module()
     monkeypatch.delenv("NO_COLOR", raising=False)
@@ -147,7 +207,7 @@ def _fake_python(tmp_path: Path) -> Path:
     return fake
 
 
-def test_chat_sh_defaults_to_repl_and_forwards_explicit_prompt(tmp_path: Path) -> None:
+def test_chat_and_agent_launchers_are_separate(tmp_path: Path) -> None:
     environment = os.environ.copy()
     environment.update({
         "PICO_MINICPM5_ROOT": str(tmp_path / "deploy"),
@@ -160,14 +220,25 @@ def test_chat_sh_defaults_to_repl_and_forwards_explicit_prompt(tmp_path: Path) -
     repl = subprocess.run(
         ["sh", str(script)], env=environment, text=True,
         capture_output=True, check=True).stdout.splitlines()
+    assert "--agent" not in repl
     assert "--interactive" in repl
     assert "--prompt" not in repl
     assert repl[repl.index("--context") + 1] == "1024"
+
+    agent = subprocess.run(
+        ["sh", str(PROJECT / "app" / "agent.sh")], env=environment,
+        text=True, capture_output=True, check=True,
+    ).stdout.splitlines()
+    assert "--agent" in agent
+    assert "--interactive" not in agent
+    assert "--prompt" not in agent
+    assert agent[agent.index("--max-new") + 1] == "128"
 
     one_shot = subprocess.run(
         ["sh", str(script), "--prompt", "hello", "--max-new", "7"],
         env=environment, text=True, capture_output=True, check=True,
     ).stdout.splitlines()
     assert one_shot.count("--prompt") == 1
+    assert "--agent" not in one_shot
     assert "--interactive" not in one_shot
     assert one_shot[-4:] == ["--prompt", "hello", "--max-new", "7"]

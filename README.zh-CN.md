@@ -38,12 +38,17 @@ Hugging Face checkpoint
 
 ```bash
 cd /opt/pico-minicpm5
-./app/chat.sh
+./app/chat.sh       # 纯对话 REPL
+./app/agent.sh      # 工具调用 Agent
 ```
 
-该命令会进入默认 `ctx1024` 的三句柄常驻流式 REPL，启动时显示彩色 MiniCPM
-ASCII pet；模型加载和首 token 等待阶段有动态耗时提示，随后逐 token 流式输出。
-支持 `/help`、`/max N`、`/reset` 和 `/quit`，初始回答上限为 128 token。
+`chat.sh` 进入纯对话 REPL；`agent.sh` 进入默认 `ctx1024` 的三句柄常驻
+Agent，使用 MiniCPM5 官方
+`<tools>/<function>/<tool_response>` 协议，内置文件、搜索、git 和需确认的
+写入/shell 工具。启动时显示彩色 MiniCPM ASCII pet；模型加载、规划和工具执行
+都有状态提示，最终回答逐 token 流式输出。支持 `/help`、`/tools`、
+`/permissions`、`/context`、`/clear`、`/max N` 和 `/quit`。两个应用复用同一套
+三只 OM 和运行时，但入口和默认行为相互独立。
 单次运行可使用 `./app/chat.sh --prompt '请用一句话解释什么是神经网络。' --max-new 32`。
 
 从 Release 下载和整理文件：

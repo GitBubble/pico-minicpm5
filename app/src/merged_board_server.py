@@ -39,6 +39,7 @@ sys.path.insert(0, str(HERE))
 import qualify_minicpm_greedy_chain as gc  # noqa: E402
 import pico_minicpm5_split_board_runner as runner  # noqa: E402
 import probe_om_execute_latency as probe  # noqa: E402
+import minicpm_agent as agent  # noqa: E402
 
 HIDDEN, KV_HEADS, HEAD_DIM, LAYERS = gc.HIDDEN, gc.KV_HEADS, gc.HEAD_DIM, gc.LAYERS
 CHANNELS = LAYERS * KV_HEADS
@@ -482,6 +483,15 @@ def main() -> int:
     ap.add_argument(
         "--interactive", action="store_true",
         help="keep the three model handles loaded and read prompts from stdin")
+    ap.add_argument(
+        "--agent", action="store_true",
+        help="run the native MiniCPM5 chat/tool-calling agent REPL")
+    ap.add_argument(
+        "--workspace", type=Path, default=Path.cwd(),
+        help="filesystem boundary for agent tools (default: current directory)")
+    ap.add_argument(
+        "--max-tool-steps", type=int, default=4,
+        help="maximum model/tool rounds per user turn")
     ap.add_argument("--max-new", type=int, default=128)
     ap.add_argument(
         "--color", choices=("auto", "always", "never"), default="auto",
@@ -504,17 +514,24 @@ def main() -> int:
         ap.error("--capture-dir and --capture-position must be provided together")
     if args.capture_position is not None and args.capture_position < 0:
         ap.error("--capture-position must be nonnegative")
-    if args.interactive and args.tokenizer is None:
-        ap.error("--interactive requires --tokenizer")
-    if args.interactive and (
+    if args.interactive and args.agent:
+        ap.error("--interactive and --agent are mutually exclusive")
+    if (args.interactive or args.agent) and args.tokenizer is None:
+        ap.error("--interactive/--agent requires --tokenizer")
+    if (args.interactive or args.agent) and (
             args.prompt_ids or args.start_position != 0 or args.kv_in is not None
             or args.kv_out is not None or args.stop_after is not None
             or args.capture_dir is not None):
-        ap.error("--interactive is incompatible with prompt-id/KV/capture controls")
-    if not args.interactive and not args.prompt and not args.prompt_ids:
-        ap.error("provide --prompt, --prompt-ids or --interactive")
+        ap.error("--interactive/--agent is incompatible with prompt-id/KV/capture controls")
+    if args.agent and args.prompt:
+        ap.error("--agent is an interactive REPL; omit --prompt")
+    if args.max_tool_steps < 1 or args.max_tool_steps > 16:
+        ap.error("--max-tool-steps must be in [1, 16]")
+    if not args.interactive and not args.agent \
+            and not args.prompt and not args.prompt_ids:
+        ap.error("provide --prompt, --prompt-ids, --interactive or --agent")
 
-    ui = TerminalUI(active=args.interactive, context=args.context,
+    ui = TerminalUI(active=args.interactive or args.agent, context=args.context,
                     color=args.color, spinner=not args.no_spinner)
     ui.banner()
     ui.start_wait("Loading three resident model handles")
@@ -526,12 +543,12 @@ def main() -> int:
                          embedding=args.embedding, context=args.context,
                          timeout=args.timeout, tokenizer=args.tokenizer,
                          resident_kv=not args.host_kv,
-                         quiet_executor=args.interactive
+                         quiet_executor=(args.interactive or args.agent)
                          and not args.verbose_executor)
     finally:
         ui.stop_wait()
     load_ms = (time.perf_counter() - began) * 1000.0
-    if args.interactive:
+    if args.interactive or args.agent:
         ui.ready(len(session.models), load_ms / 1000.0)
     else:
         print(f"loaded {len(session.models)} handles in {load_ms / 1000:.1f} s; "
@@ -577,6 +594,205 @@ def main() -> int:
             results.append({"prompt_ids": ids, "ids": out, "reason": reason,
                             "step_ms": steps,
                             "phase_ms": session.last_phase_steps})
+        if args.agent:
+            workspace_tools = agent.WorkspaceTools(args.workspace)
+            system_message = {
+                "role": "system",
+                "content": (
+                    "You are MiniCPM Agent running locally on an SS928. "
+                    "Use tools when they are needed, inspect before changing, "
+                    "and never claim a tool succeeded unless its response says ok. "
+                    "Keep final answers concise."),
+            }
+            messages = [system_message]
+            repl_max_new = args.max_new
+            ui.info("Agent ready · /help · /tools · /context · /clear · /quit")
+
+            def agent_ids():
+                rendered = agent.render_chat(
+                    messages, workspace_tools.definitions,
+                    add_generation_prompt=True, enable_thinking=False)
+                return list(session.tokenizer.encode(
+                    rendered, add_special_tokens=False).ids)
+
+            def approve_tool(preview):
+                ui.stop_wait()
+                label = ui.paint("Permission required", "1;38;5;214")
+                print(f"{label}: {preview}", flush=True)
+                try:
+                    answer = input(ui.paint("Allow once? [y/N] ", "38;5;214"))
+                except (EOFError, KeyboardInterrupt):
+                    print("", flush=True)
+                    return False
+                return answer.strip().lower() in {"y", "yes"}
+
+            while True:
+                try:
+                    spec = input(ui.prompt()).strip()
+                except EOFError:
+                    print("", flush=True)
+                    break
+                except KeyboardInterrupt:
+                    print("\nUse /quit or Ctrl-D to exit.", flush=True)
+                    continue
+                if not spec:
+                    continue
+                if spec in {"/quit", "/exit"}:
+                    break
+                if spec == "/help":
+                    ui.info(
+                        "Native MiniCPM5 XML tool calling is enabled. "
+                        f"ctx{args.context}; max-new={repl_max_new}; "
+                        f"tool rounds=1..{args.max_tool_steps}. Commands: "
+                        "/tools, /context, /clear, /max N, /permissions, /quit.")
+                    continue
+                if spec == "/tools":
+                    ui.info("Tools: " + ", ".join(workspace_tools.names))
+                    continue
+                if spec == "/permissions":
+                    ui.info(
+                        "list/read/search/git run automatically; write_file and "
+                        "run_shell require approval every time.")
+                    continue
+                if spec == "/context":
+                    try:
+                        used = len(agent_ids())
+                    except Exception as error:
+                        ui.info(f"context inspection failed: {error}")
+                    else:
+                        ui.info(
+                            f"ctx{args.context}: {used} prompt tokens used, "
+                            f"{max(0, args.context - used)} available")
+                    continue
+                if spec in {"/clear", "/reset"}:
+                    messages[:] = [system_message]
+                    ui.info("Conversation and tool history cleared.")
+                    continue
+                if spec == "/max":
+                    ui.info(
+                        f"max-new={repl_max_new}; allowed=1..{args.context - 1}")
+                    continue
+                if spec.startswith("/max "):
+                    try:
+                        requested = int(spec.split(None, 1)[1])
+                    except ValueError:
+                        ui.info("Usage: /max N")
+                        continue
+                    if requested < 1 or requested >= args.context:
+                        ui.info(f"N must be in [1, {args.context - 1}]")
+                        continue
+                    repl_max_new = requested
+                    ui.info(f"max-new={repl_max_new}")
+                    continue
+
+                messages.append({"role": "user", "content": spec})
+                turn_finished = False
+                for tool_round in range(args.max_tool_steps + 1):
+                    ids = agent_ids()
+                    if len(ids) >= args.context - 8:
+                        # Drop complete earlier turns once.  Never discard the
+                        # current tool exchange because the response would lose
+                        # the call it belongs to.
+                        if tool_round == 0 and len(messages) > 2:
+                            messages[:] = [system_message,
+                                           {"role": "user", "content": spec}]
+                            ids = agent_ids()
+                            ui.info("Older conversation was cleared to fit ctx1024.")
+                        if len(ids) >= args.context - 8:
+                            ui.info(
+                                f"Context full ({len(ids)}/{args.context}); "
+                                "use /clear or shorten the request/tool output.")
+                            break
+
+                    limit = min(repl_max_new, args.context - len(ids))
+                    shown = ""
+                    stream_mode = None
+                    prefix_shown = False
+
+                    def agent_stream(token_ids):
+                        nonlocal shown, stream_mode, prefix_shown
+                        partial = agent.clean_generated(session.tokenizer.decode(
+                            token_ids, skip_special_tokens=False))
+                        candidate = partial.lstrip()
+                        if stream_mode is None:
+                            if not candidate or "<function".startswith(candidate):
+                                return
+                            if candidate.startswith("<function"):
+                                stream_mode = "tool"
+                                return
+                            stream_mode = "answer"
+                            ui.stop_wait()
+                            ui.model_prefix()
+                            prefix_shown = True
+                        if stream_mode == "answer" and partial.startswith(shown):
+                            print(partial[len(shown):], end="", flush=True)
+                            shown = partial
+
+                    ui.start_wait(
+                        "Planning" if tool_round == 0 else "Using tool result")
+                    try:
+                        reason, out, steps = session.generate(
+                            ids, limit, {1, 130073}, start=0,
+                            on_token=agent_stream)
+                    finally:
+                        ui.stop_wait()
+                    raw = agent.clean_generated(session.tokenizer.decode(
+                        out, skip_special_tokens=False))
+                    generated_steps = steps[len(ids) - 1:]
+                    try:
+                        calls, visible = agent.parse_tool_calls(raw)
+                    except agent.ToolProtocolError as error:
+                        if prefix_shown:
+                            print("", flush=True)
+                        ui.info(f"Invalid tool call: {error}")
+                        break
+
+                    if not calls:
+                        final_text = visible or raw
+                        if not prefix_shown:
+                            ui.model_prefix()
+                            print(final_text, flush=True)
+                        elif final_text.startswith(shown):
+                            print(final_text[len(shown):], flush=True)
+                        else:
+                            print("", flush=True)
+                            ui.model_prefix()
+                            print(final_text, flush=True)
+                        ui.turn_summary(len(out), generated_steps, reason)
+                        messages.append({"role": "assistant", "content": final_text})
+                        results.append({
+                            "mode": "agent", "prompt": spec,
+                            "text": final_text, "ids": out, "reason": reason,
+                            "tool_rounds": tool_round,
+                            "step_ms": steps,
+                            "phase_ms": session.last_phase_steps,
+                        })
+                        turn_finished = True
+                        break
+
+                    if tool_round >= args.max_tool_steps:
+                        if prefix_shown:
+                            print("", flush=True)
+                        ui.info("Maximum tool rounds reached before a final answer.")
+                        break
+                    if prefix_shown:
+                        print("", flush=True)
+                    if visible:
+                        ui.info(visible)
+                    messages.append({"role": "assistant", "content": raw})
+                    for call in calls:
+                        preview = workspace_tools.preview(call)
+                        ui.info(f"⚙ {preview}")
+                        tool_result = workspace_tools.execute(
+                            call, approve=approve_tool)
+                        messages.append({"role": "tool", "content": tool_result})
+                        decoded = json.loads(tool_result)
+                        mark = "✓" if decoded["ok"] else "✗"
+                        summary = decoded["output"].splitlines()[0][:160]
+                        ui.info(f"{mark} {call.name}: {summary}")
+                if not turn_finished:
+                    results.append({"mode": "agent", "prompt": spec,
+                                    "reason": "agent_incomplete"})
         if args.interactive:
             ui.info("Commands: /help · /max N · /reset · /quit")
             epoch = 0

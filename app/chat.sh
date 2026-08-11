@@ -22,9 +22,10 @@ fi
 TOKENIZERS=${TOKENIZERS:-}
 MAX_NEW=${MAX_NEW:-128}
 
-# With no arguments and no PROMPT override, start a resident REPL. Explicit
-# CLI arguments are forwarded unchanged so `chat.sh --prompt ...` does not also
-# run a hidden default prompt.
+# With no arguments and no PROMPT override, start the plain chat REPL. Agent
+# mode has its own entry point in agent.sh. Explicit CLI arguments are
+# forwarded unchanged so `chat.sh --prompt ...` does not also run a hidden
+# default prompt.
 if [ "$#" -eq 0 ]; then
   if [ "${PROMPT+x}" = x ]; then
     set -- --prompt "$PROMPT" --max-new "$MAX_NEW"

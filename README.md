@@ -95,13 +95,18 @@ is:
 
 ```bash
 cd /opt/pico-minicpm5
-./app/chat.sh
+./app/chat.sh       # plain conversational REPL
+./app/agent.sh      # tool-calling agent
 ```
 
-This starts a colour-aware resident REPL at the default `ctx1024`, with a
-MiniCPM ASCII pet, timed loading/thinking feedback, streaming output and the
-commands `/help`, `/max N`, `/reset` and `/quit`; the initial response limit is
-128 tokens. For a one-shot run use
+`chat.sh` starts a colour-aware plain conversational REPL. `agent.sh` starts
+the resident agent at the default `ctx1024`, using the
+official MiniCPM5 `<tools>/<function>/<tool_response>` protocol. It includes
+workspace read/search/git tools plus approval-gated write/shell tools, a
+MiniCPM ASCII pet, timed planning/tool feedback and streaming final answers.
+Commands include `/tools`, `/permissions`, `/context`, `/clear`, `/max N` and
+`/quit`. The two entry points use the same three resident OM handles but remain
+separate applications. For a one-shot completion use
 `./app/chat.sh --prompt 'The capital of France is' --max-new 16`.
 
 ## Quick start

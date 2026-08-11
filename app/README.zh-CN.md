@@ -12,10 +12,12 @@
 /opt/pico-minicpm5/
 ├── app/
 │   ├── chat.sh
+│   ├── agent.sh
 │   ├── bin/pico_persistent_acl_executor.aarch64
 │   ├── native/{Makefile,pico_persistent_acl_executor.c}
-│   └── src/{merged_board_server.py,pico_minicpm5_split_board_runner.py,
-│            probe_om_execute_latency.py,qualify_minicpm_greedy_chain.py}
+│   └── src/{merged_board_server.py,minicpm_agent.py,
+│            pico_minicpm5_split_board_runner.py,probe_om_execute_latency.py,
+│            qualify_minicpm_greedy_chain.py}
 ├── models/{prefill.om,decode.om,head_flat.om}
 └── assets/{token_embedding.f16.bin,tokenizer.json}
 ```
@@ -27,10 +29,13 @@ SDK 环境提供，开源仓库和 Release 不会重新分发这些动态库。
 
 ```bash
 cd /opt/pico-minicpm5
-chmod +x app/chat.sh app/bin/pico_persistent_acl_executor.aarch64
+chmod +x app/chat.sh app/agent.sh app/bin/pico_persistent_acl_executor.aarch64
 
-# 直接进入常驻 REPL，三个模型句柄只加载一次
+# 纯对话 REPL
 ./app/chat.sh
+
+# 原生工具调用 Agent，三个模型句柄只加载一次
+./app/agent.sh
 ```
 
 ```text
@@ -41,26 +46,36 @@ chmod +x app/chat.sh app/bin/pico_persistent_acl_executor.aarch64
 
 ⠹ Loading three resident model handles  6.4s
 ✓ ready · loaded 3 handles · ctx1024 · 10.2s
-Commands: /help · /max N · /reset · /quit
-You ❯ 请用一句话解释什么是神经网络。
-⠴ MiniCPM is thinking  0.8s
+Agent ready · /help · /tools · /context · /clear · /quit
+You ❯ 读取 README.md 的前 20 行并概括项目用途。
+⠴ Planning  0.8s
+⚙ read_file(path='README.md', start_line='1', end_line='20')
+✓ read_file: 1: # pico-minicpm5
 MiniCPM ✦ ...
 You ❯ /quit
 ```
 
-板端 Demo 的默认上下文固定为 `ctx1024`。REPL 中每次输入都开始一个新的
-ctx1024 逻辑序列，但模型句柄、
-executor 进程和板端缓冲区保持常驻，避免每个问题重新加载模型的约
-10 秒开销。模型加载和首 token 等待时会显示带耗时的动态状态，文本随后按
-token 流式显示；每轮结束会显示 token 数、速度和停止原因。默认回答上限是
-128 token，
+板端 Demo 默认使用 `ctx1024` 和 MiniCPM5 官方 chat template。工具定义放在
+`<tools>` 中，模型原生生成 `<function>/<param>` XML，执行结果通过
+`<tool_response>` 回填；没有自定义另一套工具协议。Agent 会保留当前会话和
+工具历史，`/clear` 可清空。模型句柄、executor 和板端缓冲区持续常驻，避免
+每个问题重新加载约 10 秒。
+
+内置工具为 `list_directory`、`read_file`、`search_text`、`git_status`、
+`write_file` 和 `run_shell`。前四项自动执行；文件写入和 shell 每次都弹出
+`Allow once? [y/N]`，默认拒绝。所有文件工具被限制在启动时的工作目录内，可用
+`--workspace PATH` 显式指定边界。`/tools`、`/permissions` 和 `/context` 分别
+显示工具、权限和 token 预算。
+
+模型加载和首 token 等待时会显示带耗时的动态状态，最终回答逐 token 流式
+显示。默认回答上限是 128 token，
 `/max N` 可在不重启模型的情况下查看或调整。ctx1024 下 `N` 可为
 1–1023，实际可生成长度还会扣除输入 prompt 占用的
-token。`/reset` 会在可选 JSON 报告中标记新的 transcript。当前是
-独立轮次的文本续写 REPL，不会自动拼接 chat-template 多轮历史。
+token、工具定义、会话历史和工具结果。上下文不足时 Agent 会先清理较早轮次，
+仍不足则明确要求 `/clear`。每个用户请求默认最多 4 轮工具交互。
 
 颜色和动画默认只在交互式终端开启；重定向、管道和日志输出自动保持为稳定的
-纯文本。可使用 `NO_COLOR=1 ./app/chat.sh` 关闭颜色，或添加
+纯文本。可使用 `NO_COLOR=1 ./app/agent.sh` 关闭颜色，或添加
 `--no-spinner` 关闭动画。`--color always|never|auto` 和环境变量
 `PICO_MINICPM5_COLOR` 可显式控制颜色策略。REPL 默认隐藏 executor 的底层加载
 日志，调试时可添加 `--verbose-executor` 恢复显示。
@@ -77,7 +92,10 @@ token。`/reset` 会在可选 JSON 报告中标记新的 transcript。当前是
 ./app/chat.sh --prompt '1+1 equals' --max-new 16
 ```
 
-`chat.sh` 支持下列环境变量，脚本名之后的额外参数会继续传给板端 server：
+这些 `--prompt` 命令保留裸文本续写兼容路径。无参数运行时，`chat.sh` 进入纯
+对话 REPL，`agent.sh` 进入原生工具调用 Agent，两个入口互不改变对方的默认行为。
+
+两个脚本都支持下列环境变量，脚本名之后的额外参数会继续传给板端 server：
 
 | 变量 | 默认值 | 用途 |
 |---|---|---|

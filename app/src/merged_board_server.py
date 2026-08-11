@@ -33,6 +33,11 @@ import sys
 import threading
 import time
 
+try:
+    import readline as _readline  # noqa: F401
+except ImportError:  # pragma: no cover - optional outside POSIX board runtimes
+    _readline = None
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
@@ -139,7 +144,19 @@ class TerminalUI:
         print(f"{mark} {label} · loaded {detail}", flush=True)
 
     def prompt(self):
-        return f"{self.paint('You', '1;38;5;141')} {self.paint('❯', '1;38;5;45')} "
+        if not self.color:
+            return "You ❯ "
+        if _readline is None:
+            return f"{self.paint('You', '1;38;5;141')} {self.paint('❯', '1;38;5;45')} "
+
+        # GNU readline must be told which prompt bytes are zero-width. Without
+        # SOH/STX markers it counts ANSI colour sequences as visible columns,
+        # leaving stale characters behind when users erase back to the prompt.
+        def prompt_paint(text, code):
+            return f"\001\033[{code}m\002{text}\001\033[0m\002"
+
+        return f"{prompt_paint('You', '1;38;5;141')} " \
+               f"{prompt_paint('❯', '1;38;5;45')} "
 
     def model_prefix(self):
         brand = self.paint("MiniCPM", "1;38;5;45")

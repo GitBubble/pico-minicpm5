@@ -34,3 +34,5 @@ REPL 回答现在会随 token 生成逐步显示，默认上限为 128 token，�
 汉字 token，修复此前遇到拆分汉字时界面暂停并在结束后整段重放的问题。
 Agent thinking 保持默认关闭，现可通过启动参数 `--thinking`、环境变量
 `THINKING=1` 或常驻会话命令 `/think on|off` 配置。
+彩色输入提示符现遵循 readline 的零宽转义合同，中文输入退格到行首时不会残留
+第一个字符。

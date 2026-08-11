@@ -113,7 +113,8 @@ REPL.
 
 Both REPLs use an append-only UTF-8-safe decoder. CJK characters split across
 token boundaries are buffered until complete, preventing output stalls and
-whole-answer replay.
+whole-answer replay. GNU readline handles UTF-8 line editing; coloured prompt
+escapes are marked zero-width so backspace can erase the complete input line.
 
 Both launchers accept extra server arguments after the script name and
 recognize these environment overrides:

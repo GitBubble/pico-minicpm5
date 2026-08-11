@@ -220,6 +220,17 @@ def test_terminal_ui_color_can_be_forced(monkeypatch, capsys) -> None:
     assert "ctx1024" in output
     assert "loaded" in output
 
+    prompt = ui.prompt()
+    assert "\033[" in prompt
+    if server._readline is not None:
+        assert "\001\033[" in prompt
+        assert "m\002You\001\033[0m\002" in prompt
+
+    plain = server.TerminalUI(
+        active=True, context=1024, color="never", spinner=False).prompt()
+    assert plain == "You ❯ "
+    assert "\001" not in plain and "\002" not in plain
+
 
 def test_interactive_executor_can_hide_low_level_stderr(monkeypatch) -> None:
     server = _server_module()

@@ -25,7 +25,10 @@ IM_END = "<|im_end|>"
 BOS = "<s>"
 TOOL_RESPONSE_OPEN = "<tool_response>"
 TOOL_RESPONSE_CLOSE = "</tool_response>"
-MAX_TOOL_OUTPUT_CHARS = 4000
+# The deployed model has a ctx1024 contract. Tool results must leave room for
+# the schemas, call, conversation and final response; callers can request a
+# narrower follow-up window when more data is needed.
+MAX_TOOL_OUTPUT_CHARS = 800
 
 
 class ToolProtocolError(ValueError):
@@ -247,6 +250,49 @@ def parse_tool_calls(text: str) -> tuple[list[ToolCall], str]:
     return calls, visible
 
 
+_ABSOLUTE_PATH = re.compile(r"(/[^\s，。！？；]*)")
+
+
+def route_obvious_read_only(
+    user_text: str, previous_assistant: str = "",
+) -> ToolCall | None:
+    """Route only unambiguous directory-listing intents without an LLM.
+
+    MiniCPM5 remains the general tool selector.  This narrow fallback covers
+    the CLI-critical case where a small model asks the user for a path that the
+    workspace tool already knows.  It never routes mutation or shell commands.
+    """
+    text = user_text.strip()
+    lowered = text.lower()
+    path_match = _ABSOLUTE_PATH.search(text)
+    path = path_match.group(1) if path_match else "."
+    chinese_list = (
+        any(word in text for word in ("列出", "查看", "显示", "看看", "有哪些"))
+        and any(word in text for word in ("文件", "目录", "工作区", "路径")))
+    english_list = (
+        re.search(r"\b(?:ls|list|show)\b", lowered) is not None
+        and re.search(r"\b(?:files?|director(?:y|ies)|folders?|workspace)\b",
+                      lowered) is not None)
+    path_reply = (
+        ("路径" in previous_assistant or "path" in previous_assistant.lower())
+        and (path_match is not None or lowered in {"root", "/root", "."}))
+    root_shortcut = lowered in {"root", "/root"}
+    if not (chinese_list or english_list or path_reply or root_shortcut):
+        return None
+    if root_shortcut and path_match is None:
+        path = "/root"
+    return ToolCall("list_directory", {"path": path, "max_entries": "10"})
+
+
+def format_tool_call(call: ToolCall) -> str:
+    """Serialize a host-routed call using MiniCPM5's native XML contract."""
+    root = ET.Element("function", {"name": call.name})
+    for name, value in call.arguments.items():
+        child = ET.SubElement(root, "param", {"name": name})
+        child.text = value
+    return ET.tostring(root, encoding="unicode", short_empty_elements=False)
+
+
 def _integer(arguments: dict[str, str], name: str, default: int,
              minimum: int, maximum: int) -> int:
     raw = arguments.get(name)
@@ -266,23 +312,25 @@ class WorkspaceTools:
         obj = {"type": "object", "additionalProperties": False}
         self._tools = {
             tool.name: tool for tool in (
-                Tool("list_directory", "List files under the workspace.", {
+                Tool("list_directory", (
+                    "List files under the workspace. Use path='.' for the "
+                    "workspace root; never ask the user for the current path."), {
                     **obj, "properties": {
                         "path": {"type": "string", "default": "."},
-                        "max_entries": {"type": "integer", "default": 50}},
+                        "max_entries": {"type": "integer", "default": 10}},
                 }, self._list_directory),
                 Tool("read_file", "Read a UTF-8 text file by line range.", {
                     **obj, "properties": {
                         "path": {"type": "string"},
                         "start_line": {"type": "integer", "default": 1},
-                        "end_line": {"type": "integer", "default": 120}},
+                        "end_line": {"type": "integer", "default": 40}},
                     "required": ["path"],
                 }, self._read_file),
                 Tool("search_text", "Find literal text in workspace files.", {
                     **obj, "properties": {
                         "query": {"type": "string"},
                         "path": {"type": "string", "default": "."},
-                        "max_matches": {"type": "integer", "default": 30}},
+                        "max_matches": {"type": "integer", "default": 15}},
                     "required": ["query"],
                 }, self._search_text),
                 Tool("git_status", "Show concise git branch and worktree status.", {
@@ -361,9 +409,17 @@ class WorkspaceTools:
             ensure_ascii=False, separators=(",", ":"))
         return encoded.replace("<", "\\u003c")
 
+    @staticmethod
+    def for_model(result_json: str) -> str:
+        """Convert audited JSON evidence into compact model-readable text."""
+        result = json.loads(result_json)
+        status = "succeeded" if result["ok"] else "failed"
+        output = str(result["output"]).replace("<", "\\u003c")
+        return f"Tool {result['tool']} {status}.\n{output}"
+
     def _list_directory(self, arguments: dict[str, str]) -> str:
         path = self._path(arguments.get("path", "."))
-        limit = _integer(arguments, "max_entries", 50, 1, 200)
+        limit = _integer(arguments, "max_entries", 10, 1, 200)
         if not path.is_dir():
             raise ToolExecutionError(f"not a directory: {path.relative_to(self.root)}")
         entries = []
@@ -375,8 +431,8 @@ class WorkspaceTools:
     def _read_file(self, arguments: dict[str, str]) -> str:
         path = self._path(arguments["path"])
         start = _integer(arguments, "start_line", 1, 1, 1_000_000)
-        end = _integer(arguments, "end_line", min(start + 119, 1_000_000),
-                       start, start + 199)
+        end = _integer(arguments, "end_line", min(start + 39, 1_000_000),
+                       start, start + 79)
         if not path.is_file():
             raise ToolExecutionError(f"not a file: {path.relative_to(self.root)}")
         if path.stat().st_size > (2 << 20):
@@ -391,7 +447,7 @@ class WorkspaceTools:
         if not query:
             raise ToolExecutionError("query is empty")
         base = self._path(arguments.get("path", "."))
-        limit = _integer(arguments, "max_matches", 30, 1, 100)
+        limit = _integer(arguments, "max_matches", 15, 1, 100)
         matches = []
         def candidates():
             if base.is_file():

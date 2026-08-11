@@ -47,3 +47,8 @@ Agent thinking remains opt-in and is now configurable at startup with
 `--thinking`/`THINKING=1` or per resident session with `/think on|off`.
 Readline-aware coloured prompts now erase UTF-8 input cleanly back to column
 zero instead of leaving the first character visible.
+The agent prompt now binds `.` to the configured workspace and requires direct
+filesystem inspection instead of asking the user for a current path. Compact
+800-character tool results preserve enough ctx1024 budget for a final answer.
+Unambiguous listing requests have a read-only deterministic route while all
+other tool selection remains model-native.

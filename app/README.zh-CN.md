@@ -69,6 +69,12 @@ template，并保留多轮历史直至 `/clear`；`agent.sh` 再加入下面描�
 `--workspace PATH` 显式指定边界。`/tools`、`/permissions` 和 `/context` 分别
 显示工具、权限和 token 预算。
 
+Agent 已知配置的 workspace 根目录，并以 `path='.'` 表示该目录，因此应主动
+调用工具检查，而不是向用户追问当前路径。明确的目录列举请求会直接路由到只读
+`list_directory`；其他工具仍由模型原生选择。由于本交付固定 ctx1024，单次工具结果
+限制为 800 字符，目录、文件与搜索默认窗口也相应缩小；需要更多信息时应缩小范围
+或继续分页调用。
+
 Agent 的 thinking 默认关闭。可用 `./app/agent.sh --thinking` 或
 `THINKING=1 ./app/agent.sh` 在启动时开启；常驻会话中，`/think` 查看状态，
 `/think on` 与 `/think off` 可控制下一次生成而不重新加载三只模型。Thinking

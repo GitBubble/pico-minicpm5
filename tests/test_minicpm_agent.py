@@ -100,6 +100,28 @@ def test_parse_rejects_incomplete_or_duplicate_parameters() -> None:
             '<param name="a">2</param></function>')
 
 
+@pytest.mark.parametrize(("query", "previous", "path"), [
+    ("列出当前路径的文件。", "", "."),
+    ("list files in the workspace", "", "."),
+    ("root", "", "/root"),
+    ("路径是/root", "请先告诉我当前路径", "/root"),
+])
+def test_route_obvious_directory_intent(
+        query: str, previous: str, path: str) -> None:
+    agent = _agent_module()
+    call = agent.route_obvious_read_only(query, previous)
+
+    assert call == agent.ToolCall(
+        "list_directory", {"path": path, "max_entries": "10"})
+    assert agent.parse_tool_calls(agent.format_tool_call(call))[0] == [call]
+
+
+def test_read_only_router_does_not_guess_general_requests() -> None:
+    agent = _agent_module()
+    assert agent.route_obvious_read_only("介绍一下 root 用户") is None
+    assert agent.route_obvious_read_only("修改 README") is None
+
+
 def test_workspace_read_search_and_escape_guards(tmp_path: Path) -> None:
     agent = _agent_module()
     (tmp_path / "note.txt").write_text("alpha\nbeta alpha\n", encoding="utf-8")
@@ -118,6 +140,24 @@ def test_workspace_read_search_and_escape_guards(tmp_path: Path) -> None:
     assert reading["output"] == "2: beta alpha"
     assert "note.txt:1:alpha" in search["output"]
     assert not escaped["ok"] and "escapes" in escaped["output"]
+
+
+def test_default_tool_results_fit_ctx1024_budget(tmp_path: Path) -> None:
+    agent = _agent_module()
+    for index in range(80):
+        (tmp_path / f"very_long_generated_entry_name_{index:03d}").write_text("x")
+    tools = agent.WorkspaceTools(tmp_path)
+
+    listing = tools.execute(agent.ToolCall("list_directory", {}))
+
+    decoded = json.loads(listing)
+    assert decoded["ok"]
+    assert len(decoded["output"].splitlines()) == 10
+    assert len(decoded["output"]) <= agent.MAX_TOOL_OUTPUT_CHARS + 32
+
+    model_result = tools.for_model(listing)
+    assert model_result.startswith("Tool list_directory succeeded.\n")
+    assert "\\n" not in model_result
 
 
 def test_mutating_tools_require_approval_and_escape_results(tmp_path: Path) -> None:

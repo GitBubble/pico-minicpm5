@@ -626,8 +626,13 @@ def main() -> int:
                 "role": "system",
                 "content": (
                     "You are MiniCPM Agent running locally on an SS928. "
-                    "Use tools when they are needed, inspect before changing, "
+                    f"The configured workspace root is {workspace_tools.root}. "
+                    "Use path='.' for that root. Never ask the user for a path "
+                    "that a filesystem tool can inspect. When filesystem facts "
+                    "are requested, call the appropriate tool immediately; do "
+                    "not merely say that you will call it. Inspect before changing, "
                     "and never claim a tool succeeded unless its response says ok. "
+                    "Summarize tool results and do not repeat long output verbatim. "
                     "Keep final answers concise."),
             }
             messages = [system_message]
@@ -727,9 +732,30 @@ def main() -> int:
                     ui.info(f"max-new={repl_max_new}")
                     continue
 
+                previous_assistant = next((
+                    str(message.get("content", ""))
+                    for message in reversed(messages)
+                    if message.get("role") == "assistant"), "")
                 messages.append({"role": "user", "content": spec})
+                routed_call = agent.route_obvious_read_only(
+                    spec, previous_assistant)
+                initial_tool_rounds = 0
+                if routed_call is not None:
+                    routed_xml = agent.format_tool_call(routed_call)
+                    messages.append({"role": "assistant", "content": routed_xml})
+                    ui.info(f"⚙ {workspace_tools.preview(routed_call)}")
+                    tool_result = workspace_tools.execute(routed_call)
+                    messages.append({
+                        "role": "tool",
+                        "content": workspace_tools.for_model(tool_result)})
+                    decoded = json.loads(tool_result)
+                    mark = "✓" if decoded["ok"] else "✗"
+                    summary = decoded["output"].splitlines()[0][:160]
+                    ui.info(f"{mark} {routed_call.name}: {summary}")
+                    initial_tool_rounds = 1
                 turn_finished = False
-                for tool_round in range(args.max_tool_steps + 1):
+                for tool_round in range(
+                        initial_tool_rounds, args.max_tool_steps + 1):
                     ids = agent_ids()
                     if len(ids) >= args.context - 8:
                         # Drop complete earlier turns once.  Never discard the
@@ -838,7 +864,9 @@ def main() -> int:
                         ui.info(f"⚙ {preview}")
                         tool_result = workspace_tools.execute(
                             call, approve=approve_tool)
-                        messages.append({"role": "tool", "content": tool_result})
+                        messages.append({
+                            "role": "tool",
+                            "content": workspace_tools.for_model(tool_result)})
                         decoded = json.loads(tool_result)
                         mark = "✓" if decoded["ok"] else "✗"
                         summary = decoded["output"].splitlines()[0][:160]

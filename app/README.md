@@ -73,6 +73,14 @@ tools are confined to the startup working directory; use `--workspace PATH`
 to set an explicit boundary. `/tools`, `/permissions` and `/context` display
 the registry, policy and token budget.
 
+The agent knows the configured workspace root and uses `path='.'` for it, so it
+must inspect available paths rather than ask the user for the current directory.
+Unambiguous directory-listing requests are routed directly to the read-only
+`list_directory` tool; general tool selection remains model-native.
+Because this release is ctx1024, tool responses are capped at 800 characters;
+directory, file and search defaults are deliberately small and can be narrowed
+or paged with a follow-up call.
+
 Agent thinking is disabled by default. Start it enabled with either
 `./app/agent.sh --thinking` or `THINKING=1 ./app/agent.sh`. During a resident
 session, `/think` reports the state and `/think on` or `/think off` changes the

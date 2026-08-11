@@ -141,6 +141,8 @@ def test_agent_repl_executes_native_tool_call(monkeypatch, capsys, tmp_path) -> 
     assert "thinking=on" in output
     assert "<tool_response>" in rendered_prompts[1]
     assert "hello from tool" in rendered_prompts[1]
+    assert "Use path='.' for that root" in rendered_prompts[0]
+    assert str(tmp_path) in rendered_prompts[0]
     assert rendered_prompts[0].endswith(
         "<|im_start|>assistant\n<think>\n")
 

@@ -119,7 +119,8 @@ def test_agent_repl_executes_native_tool_call(monkeypatch, capsys, tmp_path) -> 
         def close(self):
             pass
 
-    prompts = iter(["Please read note.txt", "/quit"])
+    prompts = iter([
+        "/think", "/think on", "Please read note.txt", "/think off", "/quit"])
     monkeypatch.setattr(server, "Merged", Session)
     monkeypatch.setattr(builtins, "input", lambda _prompt: next(prompts))
     monkeypatch.setattr(sys, "argv", [
@@ -136,8 +137,12 @@ def test_agent_repl_executes_native_tool_call(monkeypatch, capsys, tmp_path) -> 
     assert "⚙ read_file(path='note.txt')" in output
     assert "✓ read_file: 1: hello from tool" in output
     assert "MiniCPM ✦ The note says hello from tool." in output
+    assert "thinking=off" in output
+    assert "thinking=on" in output
     assert "<tool_response>" in rendered_prompts[1]
     assert "hello from tool" in rendered_prompts[1]
+    assert rendered_prompts[0].endswith(
+        "<|im_start|>assistant\n<think>\n")
 
 
 def test_chat_repl_uses_template_and_streams_split_cjk_once(
@@ -303,6 +308,14 @@ def test_chat_and_agent_launchers_are_separate(tmp_path: Path) -> None:
     assert "--interactive" not in agent
     assert "--prompt" not in agent
     assert agent[agent.index("--max-new") + 1] == "128"
+
+    thinking_environment = environment.copy()
+    thinking_environment["THINKING"] = "on"
+    thinking_agent = subprocess.run(
+        ["sh", str(PROJECT / "app" / "agent.sh")],
+        env=thinking_environment, text=True, capture_output=True, check=True,
+    ).stdout.splitlines()
+    assert "--thinking" in thinking_agent
 
     one_shot = subprocess.run(
         ["sh", str(script), "--prompt", "hello", "--max-new", "7"],

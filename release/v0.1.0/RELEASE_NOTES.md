@@ -43,3 +43,5 @@ remains the plain conversational REPL, and one-shot `--prompt` stays available.
 The chat entry now uses the official no-tools chat template. UTF-8-safe
 incremental decoding buffers incomplete CJK byte pieces, fixing the terminal
 stall and whole-answer replay previously seen around split characters.
+Agent thinking remains opt-in and is now configurable at startup with
+`--thinking`/`THINKING=1` or per resident session with `/think on|off`.

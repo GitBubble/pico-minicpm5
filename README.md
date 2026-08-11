@@ -105,8 +105,10 @@ the resident agent at the default `ctx1024`, using the
 official MiniCPM5 `<tools>/<function>/<tool_response>` protocol. It includes
 workspace read/search/git tools plus approval-gated write/shell tools, a
 MiniCPM ASCII pet, timed planning/tool feedback and streaming final answers.
-Commands include `/tools`, `/permissions`, `/context`, `/clear`, `/max N` and
-`/quit`. The two entry points use the same three resident OM handles but remain
+Commands include `/tools`, `/think on|off`, `/permissions`, `/context`,
+`/clear`, `/max N` and `/quit`. Thinking is off by default; start with
+`./app/agent.sh --thinking` or toggle it without reloading the models. The two
+entry points use the same three resident OM handles but remain
 separate applications. For a one-shot completion use
 `./app/chat.sh --prompt 'The capital of France is' --max-new 16`.
 The explicit `--prompt` and `--interactive` options retain the legacy raw-text

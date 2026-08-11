@@ -490,6 +490,9 @@ def main() -> int:
         "--agent", action="store_true",
         help="run the native MiniCPM5 chat/tool-calling agent REPL")
     ap.add_argument(
+        "--thinking", action="store_true",
+        help="start agent mode with model thinking enabled")
+    ap.add_argument(
         "--workspace", type=Path, default=Path.cwd(),
         help="filesystem boundary for agent tools (default: current directory)")
     ap.add_argument(
@@ -528,6 +531,8 @@ def main() -> int:
         ap.error("REPL modes are incompatible with prompt-id/KV/capture controls")
     if (args.chat or args.agent) and args.prompt:
         ap.error("--chat/--agent are interactive REPLs; omit --prompt")
+    if args.thinking and not args.agent:
+        ap.error("--thinking requires --agent")
     if args.max_tool_steps < 1 or args.max_tool_steps > 16:
         ap.error("--max-tool-steps must be in [1, 16]")
     if not args.interactive and not args.chat and not args.agent \
@@ -610,12 +615,16 @@ def main() -> int:
             }
             messages = [system_message]
             repl_max_new = args.max_new
-            ui.info("Agent ready · /help · /tools · /context · /clear · /quit")
+            thinking_enabled = bool(args.thinking)
+            ui.info(
+                "Agent ready · /help · /tools · /think on|off · "
+                "/context · /clear · /quit")
 
             def agent_ids():
                 rendered = agent.render_chat(
                     messages, workspace_tools.definitions,
-                    add_generation_prompt=True, enable_thinking=False)
+                    add_generation_prompt=True,
+                    enable_thinking=thinking_enabled)
                 return list(session.tokenizer.encode(
                     rendered, add_special_tokens=False).ids)
 
@@ -647,8 +656,10 @@ def main() -> int:
                     ui.info(
                         "Native MiniCPM5 XML tool calling is enabled. "
                         f"ctx{args.context}; max-new={repl_max_new}; "
+                        f"thinking={'on' if thinking_enabled else 'off'}; "
                         f"tool rounds=1..{args.max_tool_steps}. Commands: "
-                        "/tools, /context, /clear, /max N, /permissions, /quit.")
+                        "/tools, /think on|off, /context, /clear, /max N, "
+                        "/permissions, /quit.")
                     continue
                 if spec == "/tools":
                     ui.info("Tools: " + ", ".join(workspace_tools.names))
@@ -657,6 +668,16 @@ def main() -> int:
                     ui.info(
                         "list/read/search/git run automatically; write_file and "
                         "run_shell require approval every time.")
+                    continue
+                if spec == "/think":
+                    ui.info(f"thinking={'on' if thinking_enabled else 'off'}")
+                    continue
+                if spec in {"/think on", "/think off"}:
+                    thinking_enabled = spec.endswith("on")
+                    ui.info(f"thinking={'on' if thinking_enabled else 'off'}")
+                    continue
+                if spec.startswith("/think "):
+                    ui.info("Usage: /think on|off")
                     continue
                 if spec == "/context":
                     try:
@@ -709,14 +730,17 @@ def main() -> int:
                             break
 
                     limit = min(repl_max_new, args.context - len(ids))
+                    stream_decoder = agent.StableTextStream(
+                        session.tokenizer, skip_special_tokens=False)
                     shown = ""
                     stream_mode = None
                     prefix_shown = False
 
                     def agent_stream(token_ids):
                         nonlocal shown, stream_mode, prefix_shown
-                        partial = agent.clean_generated(session.tokenizer.decode(
-                            token_ids, skip_special_tokens=False))
+                        stream_decoder.update(token_ids)
+                        partial = agent.clean_stream_generated(
+                            stream_decoder.text)
                         candidate = partial.lstrip()
                         if stream_mode is None:
                             if not candidate or "<function".startswith(candidate):
@@ -728,9 +752,14 @@ def main() -> int:
                             ui.stop_wait()
                             ui.model_prefix()
                             prefix_shown = True
-                        if stream_mode == "answer" and partial.startswith(shown):
-                            print(partial[len(shown):], end="", flush=True)
-                            shown = partial
+                        if stream_mode == "answer":
+                            # Thinking may precede a tool call. Show the
+                            # thinking text, but never leak raw function XML.
+                            visible_partial = partial.split("<function", 1)[0]
+                            if visible_partial.startswith(shown):
+                                print(visible_partial[len(shown):], end="",
+                                      flush=True)
+                                shown = visible_partial
 
                     ui.start_wait(
                         "Planning" if tool_round == 0 else "Using tool result")
@@ -742,6 +771,7 @@ def main() -> int:
                         ui.stop_wait()
                     raw = agent.clean_generated(session.tokenizer.decode(
                         out, skip_special_tokens=False))
+                    stream_decoder.finish(out)
                     generated_steps = steps[len(ids) - 1:]
                     try:
                         calls, visible = agent.parse_tool_calls(raw)
@@ -760,13 +790,15 @@ def main() -> int:
                             print(final_text[len(shown):], flush=True)
                         else:
                             print("", flush=True)
-                            ui.model_prefix()
-                            print(final_text, flush=True)
+                            ui.info(
+                                "Streaming decoder could not reconcile the "
+                                "final text.")
                         ui.turn_summary(len(out), generated_steps, reason)
                         messages.append({"role": "assistant", "content": final_text})
                         results.append({
                             "mode": "agent", "prompt": spec,
                             "text": final_text, "ids": out, "reason": reason,
+                            "thinking": thinking_enabled,
                             "tool_rounds": tool_round,
                             "step_ms": steps,
                             "phase_ms": session.last_phase_steps,
@@ -781,7 +813,7 @@ def main() -> int:
                         break
                     if prefix_shown:
                         print("", flush=True)
-                    if visible:
+                    if visible and not prefix_shown:
                         ui.info(visible)
                     messages.append({"role": "assistant", "content": raw})
                     for call in calls:

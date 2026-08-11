@@ -51,6 +51,16 @@ def test_render_chat_groups_tool_responses() -> None:
     assert rendered.count("<tool_response>") == 2
 
 
+def test_render_chat_can_enable_thinking_prefix() -> None:
+    agent = _agent_module()
+    rendered = agent.render_chat(
+        [{"role": "user", "content": "Plan it"}],
+        enable_thinking=True)
+
+    assert rendered.endswith("<|im_start|>assistant\n<think>\n")
+    assert "</think>" not in rendered
+
+
 def test_stable_stream_buffers_incomplete_cjk_token() -> None:
     agent = _agent_module()
 

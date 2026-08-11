@@ -32,3 +32,5 @@ REPL 回答现在会随 token 生成逐步显示，默认上限为 128 token，�
 `--prompt` 路径继续保留。
 聊天入口现使用官方无工具 chat template；UTF-8 安全增量解码会缓存尚未完整的
 汉字 token，修复此前遇到拆分汉字时界面暂停并在结束后整段重放的问题。
+Agent thinking 保持默认关闭，现可通过启动参数 `--thinking`、环境变量
+`THINKING=1` 或常驻会话命令 `/think on|off` 配置。

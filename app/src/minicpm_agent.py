@@ -177,11 +177,16 @@ def render_chat(
 
 def clean_generated(text: str) -> str:
     """Remove transport terminators while retaining XML tool tokens."""
+    return clean_stream_generated(text).strip()
+
+
+def clean_stream_generated(text: str) -> str:
+    """Remove complete trailing transport tokens without trimming content."""
     value = text
     for token in (IM_END, "</s>"):
         while value.endswith(token):
             value = value[:-len(token)]
-    return value.strip()
+    return value
 
 
 _FUNCTION_START = re.compile(r"<function(?:\s|>)")

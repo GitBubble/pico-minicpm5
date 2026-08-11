@@ -46,7 +46,7 @@ chmod +x app/chat.sh app/agent.sh app/bin/pico_persistent_acl_executor.aarch64
 
 ⠹ Loading three resident model handles  6.4s
 ✓ ready · loaded 3 handles · ctx1024 · 10.2s
-Agent ready · /help · /tools · /context · /clear · /quit
+Agent ready · /help · /tools · /think on|off · /context · /clear · /quit
 You ❯ 读取 README.md 的前 20 行并概括项目用途。
 ⠴ Planning  0.8s
 ⚙ read_file(path='README.md', start_line='1', end_line='20')
@@ -68,6 +68,11 @@ template，并保留多轮历史直至 `/clear`；`agent.sh` 再加入下面描�
 `Allow once? [y/N]`，默认拒绝。所有文件工具被限制在启动时的工作目录内，可用
 `--workspace PATH` 显式指定边界。`/tools`、`/permissions` 和 `/context` 分别
 显示工具、权限和 token 预算。
+
+Agent 的 thinking 默认关闭。可用 `./app/agent.sh --thinking` 或
+`THINKING=1 ./app/agent.sh` 在启动时开启；常驻会话中，`/think` 查看状态，
+`/think on` 与 `/think off` 可控制下一次生成而不重新加载三只模型。Thinking
+token 与工具定义、历史和最终回答共同占用 ctx1024 预算。
 
 模型加载和首 token 等待时会显示带耗时的动态状态，最终回答逐 token 流式
 显示。默认回答上限是 128 token，
@@ -111,6 +116,7 @@ token、工具定义、会话历史和工具结果。上下文不足时 Agent �
 | `TOKENIZERS` | 空 | 可选的额外 `site-packages` 路径 |
 | `PROMPT` | 未设置 | 可选单次 prompt；未设置时进入 REPL |
 | `MAX_NEW` | `128` | 初始最大生成 token 数 |
+| `THINKING` | `0` | `agent.sh` 启动 thinking：`0/1`、`off/on`、`false/true` |
 | `PICO_MINICPM5_COLOR` | `auto` | `auto`、`always` 或 `never` |
 | `NO_COLOR` | 未设置 | 设置后在 auto 模式关闭 ANSI 颜色 |
 

@@ -48,7 +48,7 @@ chmod +x app/chat.sh app/agent.sh app/bin/pico_persistent_acl_executor.aarch64
 
 ⠹ Loading three resident model handles  6.4s
 ✓ ready · loaded 3 handles · ctx1024 · 10.2s
-Agent ready · /help · /tools · /context · /clear · /quit
+Agent ready · /help · /tools · /think on|off · /context · /clear · /quit
 You ❯ Read the first 20 lines of README.md and summarize the project.
 ⠴ Planning  0.8s
 ⚙ read_file(path='README.md', start_line='1', end_line='20')
@@ -72,6 +72,12 @@ shell commands prompt `Allow once? [y/N]` every time and default to deny. File
 tools are confined to the startup working directory; use `--workspace PATH`
 to set an explicit boundary. `/tools`, `/permissions` and `/context` display
 the registry, policy and token budget.
+
+Agent thinking is disabled by default. Start it enabled with either
+`./app/agent.sh --thinking` or `THINKING=1 ./app/agent.sh`. During a resident
+session, `/think` reports the state and `/think on` or `/think off` changes the
+next generation without reloading the three models. Thinking tokens consume
+the same ctx1024 budget as tool definitions, history and the final answer.
 
 A timed activity indicator covers model loading and time-to-first-token, then
 the final answer streams token by token. The default
@@ -120,6 +126,7 @@ recognize these environment overrides:
 | `TOKENIZERS` | empty | Optional extra `site-packages` path |
 | `PROMPT` | unset | Optional one-shot prompt; unset starts REPL |
 | `MAX_NEW` | `128` | Initial maximum generated tokens |
+| `THINKING` | `0` | `agent.sh` startup thinking: `0/1`, `off/on`, `false/true` |
 | `PICO_MINICPM5_COLOR` | `auto` | `auto`, `always` or `never` |
 | `NO_COLOR` | unset | Disable ANSI colour while in auto mode |
 

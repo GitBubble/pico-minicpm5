@@ -112,6 +112,34 @@ def test_interactive_executor_can_hide_low_level_stderr(monkeypatch) -> None:
     assert captured[0][1]["stderr"] is subprocess.DEVNULL
 
 
+def test_merged_accepts_a_legacy_executor_launcher(monkeypatch, tmp_path) -> None:
+    server = _server_module()
+    calls = []
+
+    class FakeProcess:
+        stdout = object()
+
+    def legacy_start(*args, **kwargs):
+        calls.append(kwargs)
+        if kwargs:
+            raise TypeError("_start() got an unexpected keyword argument 'quiet'")
+        return FakeProcess()
+
+    monkeypatch.setattr(server.probe, "_start", legacy_start)
+    monkeypatch.setattr(server.probe, "_read_ready", lambda *_args: [([], [])] * 2)
+    monkeypatch.setattr(server.Merged, "_identify_kv", lambda _self: {})
+    embedding = tmp_path / "embedding.bin"
+    embedding.write_bytes(b"")
+
+    session = server.Merged(
+        executable=Path("executor"), decode=Path("decode.om"), prefill=None,
+        head=Path("head.om"), library_paths=[], embedding=embedding,
+        context=1024, timeout=1.0, quiet_executor=True)
+    session.embed.close()
+
+    assert calls == [{"quiet": True}, {}]
+
+
 def _fake_python(tmp_path: Path) -> Path:
     fake = tmp_path / "python"
     fake.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n", encoding="utf-8")

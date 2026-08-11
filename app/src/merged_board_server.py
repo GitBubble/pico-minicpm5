@@ -182,8 +182,18 @@ class Merged:
         self.decode_index = 0
         self.prefill_index = 1 if prefill else 0
         self.head_index = len(self.models) - 1
-        self.process = probe._start(
-            executable, self.models, library_paths, 0, quiet=quiet_executor)
+        try:
+            self.process = probe._start(
+                executable, self.models, library_paths, 0,
+                quiet=quiet_executor)
+        except TypeError as error:
+            # A board may retain the pre-UI helper while only the REPL server
+            # is refreshed.  Keep that partial upgrade runnable; the only
+            # degradation is that legacy executor diagnostics remain visible.
+            if "unexpected keyword argument 'quiet'" not in str(error):
+                raise
+            self.process = probe._start(
+                executable, self.models, library_paths, 0)
         self._deadline = time.monotonic() + timeout
         self.descriptors = probe._read_ready(
             self.process.stdout, len(self.models), self._deadline)

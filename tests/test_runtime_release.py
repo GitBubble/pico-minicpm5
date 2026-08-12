@@ -13,9 +13,14 @@ from pico_minicpm5.release.runtime import create_runtime_archive
 def _fixture(tmp_path: Path) -> tuple[Path, Path]:
     root = tmp_path / "project"
     (root / "app/native").mkdir(parents=True)
+    (root / "app/src").mkdir(parents=True)
     (root / "release/v0.1.0").mkdir(parents=True)
     (root / "app/chat.sh").write_text("#!/bin/sh\n", encoding="utf-8")
     (root / "app/native/Makefile").write_text("all:\n\ttrue\n", encoding="utf-8")
+    (root / "app/src/minicpm_prefill_schedule.py").write_text(
+        "CANDIDATE_WIDTHS = (128, 32, 16, 1)\n", encoding="utf-8")
+    (root / "app/src/minicpm_prefill_activation.py").write_text(
+        "SCHEMA = 'pico.minicpm5.prefill-activation.v1'\n", encoding="utf-8")
     (root / "app/src/__pycache__").mkdir(parents=True)
     (root / "app/src/__pycache__/server.cpython-311.pyc").write_bytes(b"cache")
     for name in ("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "MODEL_PROVENANCE.md"):
@@ -43,6 +48,8 @@ def test_runtime_archive_has_one_app_layout(tmp_path: Path) -> None:
         names = archive.getnames()
     assert any(name.endswith("/app/chat.sh") for name in names)
     assert any(name.endswith("/app/native/Makefile") for name in names)
+    assert any(name.endswith("/app/src/minicpm_prefill_schedule.py") for name in names)
+    assert any(name.endswith("/app/src/minicpm_prefill_activation.py") for name in names)
     assert any(name.endswith("/app/bin/pico_persistent_acl_executor.aarch64") for name in names)
     assert not any("__pycache__" in name or name.endswith(".pyc") for name in names)
     assert not any("/demo/" in name or name.endswith("/chat.sh") and "/app/" not in name

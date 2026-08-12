@@ -16,5 +16,6 @@
     "prefill": "models/ctx4096/prefill.om",
     "head": "models/head_flat.om"
   },
+  "transformer_outputs": {"k": 0, "v": 1, "hidden": 2},
   "numeric_gate": {"minimum_cosine_exclusive": 0.98}
 }

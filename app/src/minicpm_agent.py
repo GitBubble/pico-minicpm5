@@ -5,7 +5,7 @@
 The renderer follows OpenBMB's ``chat_template.jinja`` contract: JSON function
 signatures live inside ``<tools>`` and the assistant emits XML ``<function>``
 calls.  This module deliberately has no third-party runtime dependencies so it
-can run in the minimal Python environment shipped on SS928 boards.
+can run in the minimal Python environment shipped on Hi3403 boards.
 """
 from __future__ import annotations
 
@@ -262,19 +262,142 @@ def parse_tool_calls(text: str) -> tuple[list[ToolCall], str]:
 
 
 _ABSOLUTE_PATH = re.compile(r"(/[^\s，。！？；]*)")
+_FILE_PATH = re.compile(
+    r"(?<![\w.-])((?:\.{0,2}/|/)?(?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9_-]+)")
+_MODEL_TRANSFORM = (
+    "总结", "概括", "解释", "分析", "比较", "翻译", "summarize", "summary",
+    "explain", "analyse", "analyze", "compare", "translate",
+)
+_UNSAFE_DIRECT = (
+    "改写", "修改", "删除", "创建", "生成", "执行", "运行", "modify", "edit",
+    "delete", "remove", "write", "create", "run", "execute",
+)
+
+
+def _has_term(text: str, terms: tuple[str, ...]) -> bool:
+    return any(
+        re.search(rf"\b{re.escape(term)}\b", text) is not None
+        if term.isascii() else term in text
+        for term in terms)
+
+
+def _explicit_file_path(text: str) -> str | None:
+    """Return a concrete file path; never infer a file from general prose."""
+    for pattern in (
+            r"`([^`\r\n]+)`", r"[\"“]([^\"”\r\n]+)[\"”]",
+            r"'([^'\r\n]+)'"):
+        match = re.search(pattern, text)
+        if match and _FILE_PATH.fullmatch(match.group(1).strip()):
+            return match.group(1).strip()
+    match = _FILE_PATH.search(text)
+    return match.group(1) if match else None
+
+
+def _line_window(text: str) -> tuple[str, str]:
+    patterns = (
+        r"第\s*(\d+)\s*(?:到|至|[-:])\s*(\d+)\s*行",
+        r"lines?\s+(\d+)\s*(?:to|through|[-:])\s*(\d+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            start, end = int(match.group(1)), int(match.group(2))
+            if 1 <= start <= end <= start + 79:
+                return str(start), str(end)
+            return "1", "40"
+    first = re.search(r"前\s*(\d+)\s*行", text)
+    if first is None:
+        chinese = re.search(r"前\s*([一二两三四五六七八九十])\s*行", text)
+        if chinese:
+            values = {
+                "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
+                "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+            return "1", str(values[chinese.group(1)])
+    if first is None:
+        first = re.search(r"first\s+(\d+)\s+lines?", text, re.IGNORECASE)
+    if first:
+        end = min(max(int(first.group(1)), 1), 80)
+        return "1", str(end)
+    return "1", "40"
+
+
+def _search_query(text: str) -> str | None:
+    match = re.search(
+        r"(?:搜索|查找|检索|search(?:\s+for)?|find)\s*"
+        r"(?:[\"“']([^\"”'\r\n]+)[\"”']|`([^`\r\n]+)`)",
+        text, re.IGNORECASE)
+    if match is None:
+        return None
+    query = next(value for value in match.groups() if value is not None).strip()
+    return query or None
 
 
 def route_obvious_read_only(
     user_text: str, previous_assistant: str = "",
 ) -> RouteDecision | None:
-    """Route only unambiguous directory-listing intents without an LLM.
+    """Route unambiguous, presentation-free read-only intents without an LLM.
 
-    MiniCPM5 remains the general tool selector.  This narrow fallback covers
-    the CLI-critical case where a small model asks the user for a path that the
-    workspace tool already knows.  It never routes mutation or shell commands.
+    MiniCPM5 remains the general tool selector. A request that needs summary,
+    explanation, transformation, mutation or a shell is deliberately returned
+    to the model even when it also contains a recognizable read operation.
     """
     text = user_text.strip()
     lowered = text.lower()
+    if not text or _has_term(lowered, _UNSAFE_DIRECT):
+        return None
+    needs_model = _has_term(lowered, _MODEL_TRANSFORM)
+
+    def route(call: ToolCall, reason: str, confidence: float = 0.99):
+        if needs_model:
+            return RouteDecision(
+                mode="TOOL_THEN_MODEL", confidence=confidence,
+                tool_calls=(call,), response_policy="MODEL_SUMMARY",
+                schema_profile="result_page", permission="automatic",
+                reason=f"{reason} with model transformation")
+        return RouteDecision(
+            mode="DIRECT_TOOL", confidence=confidence, tool_calls=(call,),
+            response_policy="DIRECT_FORMATTED", schema_profile="none",
+            permission="automatic", reason=reason)
+
+    current_directory = (
+        lowered in {"pwd", "cwd"}
+        or text in {"当前路径", "当前目录", "工作目录", "工作区路径"}
+        or re.fullmatch(
+            r"(?:what(?:'s| is)\s+)?(?:the\s+)?current\s+"
+            r"(?:working\s+)?directory\??", lowered) is not None
+        or (any(term in text for term in ("当前路径", "当前目录", "工作目录", "工作区路径"))
+            and any(term in text for term in ("什么", "显示", "查看", "告诉", "输出", "?", "？")))
+    )
+    if current_directory:
+        return route(
+            ToolCall("current_directory", {}),
+            "explicit current-directory request")
+
+    git_status = (
+        re.fullmatch(r"(?:show\s+)?git\s+status[.!?]?", lowered) is not None
+        or ("状态" in text and any(term in lowered for term in ("git", "仓库")))
+    )
+    if git_status:
+        return route(ToolCall("git_status", {}), "explicit git-status request")
+
+    query = _search_query(text)
+    if query is not None:
+        return route(ToolCall(
+            "search_text", {"query": query, "path": ".", "max_matches": "15"}),
+            "explicit literal-search request", confidence=0.98)
+
+    file_path = _explicit_file_path(text)
+    read_intent = (
+        any(term in text for term in ("读取", "打开", "显示", "查看", "看下", "看看"))
+        or re.search(r"\b(?:read|show|open|view|print)\b", lowered) is not None
+    )
+    if read_intent and file_path is not None:
+        start, end = _line_window(text)
+        return route(ToolCall(
+            "read_file", {"path": file_path, "start_line": start,
+                          "end_line": end}),
+            "explicit file-window request", confidence=0.98)
+
     path_match = _ABSOLUTE_PATH.search(text)
     path = path_match.group(1) if path_match else "."
     chinese_list = (
@@ -293,10 +416,7 @@ def route_obvious_read_only(
     if root_shortcut and path_match is None:
         path = "/root"
     call = ToolCall("list_directory", {"path": path, "max_entries": "10"})
-    return RouteDecision(
-        mode="DIRECT_TOOL", confidence=0.99, tool_calls=(call,),
-        response_policy="DIRECT_FORMATTED", schema_profile="none",
-        permission="automatic", reason="explicit directory listing request")
+    return route(call, "explicit directory listing request")
 
 
 def format_tool_call(call: ToolCall) -> str:
@@ -306,6 +426,94 @@ def format_tool_call(call: ToolCall) -> str:
         child = ET.SubElement(root, "param", {"name": name})
         child.text = value
     return ET.tostring(root, encoding="unicode", short_empty_elements=False)
+
+
+def _compact_memory_text(value: object, limit: int) -> str:
+    text = " ".join(str(value).replace("\x00", "\\x00").split())
+    if len(text) <= limit:
+        return text
+    return text[:max(0, limit - 1)] + "…"
+
+
+def compact_agent_messages(
+    messages: list[dict], *, keep_recent_turns: int = 1,
+    memory_chars: int = 800,
+) -> tuple[list[dict], dict[str, int | bool]]:
+    """Deterministically compact old complete Agent turns.
+
+    The current user/tool exchange and a bounded number of recent turns remain
+    byte-for-byte. Older raw tool output is replaced by its audited first-line
+    reference plus clipped user/final-assistant text. No model is invoked and
+    the system message is never rewritten.
+    """
+    if type(keep_recent_turns) is not int or keep_recent_turns < 0:
+        raise ValueError("keep_recent_turns must be a nonnegative integer")
+    if type(memory_chars) is not int or memory_chars < 128:
+        raise ValueError("memory_chars must be an integer >= 128")
+    if not messages or messages[0].get("role") != "system":
+        raise ValueError("agent messages must start with one system message")
+
+    turns: list[list[dict]] = []
+    current: list[dict] = []
+    for message in messages[1:]:
+        if message.get("role") == "user" and current:
+            turns.append(current)
+            current = []
+        current.append(dict(message))
+    if current:
+        turns.append(current)
+    retained = keep_recent_turns + 1  # Always preserve the current turn.
+    if len(turns) <= retained:
+        return list(messages), {
+            "changed": False, "turns_compacted": 0,
+            "memory_chars": 0}
+
+    older = turns[:-retained]
+    recent = turns[-retained:]
+    blocks: list[str] = []
+    used = 0
+    for turn in reversed(older):
+        lines: list[str] = []
+        user = next((item for item in turn if item.get("role") == "user"), None)
+        if user is not None:
+            lines.append(
+                "user: " + _compact_memory_text(user.get("content", ""), 180))
+        for item in turn:
+            if item.get("role") == "tool":
+                header = str(item.get("content", "")).splitlines()[0]
+                lines.append("tool: " + _compact_memory_text(header, 180))
+        final_assistant = next((
+            item for item in reversed(turn)
+            if item.get("role") == "assistant"
+            and "<function" not in str(item.get("content", ""))), None)
+        if final_assistant is not None:
+            lines.append("assistant: " + _compact_memory_text(
+                final_assistant.get("content", ""), 220))
+        block = "\n".join(lines) or "[older turn omitted]"
+        if len(block) + used > memory_chars:
+            remaining = memory_chars - used
+            if remaining >= 32:
+                blocks.insert(0, _compact_memory_text(block, remaining))
+            break
+        blocks.insert(0, block)
+        used += len(block) + 1
+
+    memory = (
+        "[Host-compacted session memory; raw tool output omitted]\n"
+        + "\n".join(blocks))
+    compacted = [dict(messages[0]), {
+        "role": "user", "content": memory,
+    }, {
+        "role": "assistant",
+        "content": "Compacted session memory loaded.",
+    }]
+    for turn in recent:
+        compacted.extend(turn)
+    return compacted, {
+        "changed": True,
+        "turns_compacted": len(older),
+        "memory_chars": len(memory),
+    }
 
 
 def _integer(arguments: dict[str, str], name: str, default: int,
@@ -320,6 +528,29 @@ def _integer(arguments: dict[str, str], name: str, default: int,
 class WorkspaceTools:
     """Workspace-confined tools with explicit approval for mutation/shell."""
 
+    _READ_ONLY = (
+        "current_directory", "list_directory", "read_file", "search_text",
+        "git_status", "read_result_page")
+    _PROFILES = {
+        "none": (),
+        "result_page": ("read_result_page",),
+        "read_only": _READ_ONLY,
+        "read_write": (*_READ_ONLY, "write_file"),
+        "read_shell": (*_READ_ONLY, "run_shell"),
+        "all": (*_READ_ONLY, "write_file", "run_shell"),
+    }
+    _RESULT_TYPES = {
+        "current_directory": "path",
+        "list_directory": "directory_entries",
+        "read_file": "text_lines",
+        "search_text": "search_matches",
+        "git_status": "git_status",
+        "write_file": "write_receipt",
+        "run_shell": "shell_output",
+    }
+    _MAX_RESULTS = 16
+    _MAX_STORED_RESULT_CHARS = 65_536
+
     def __init__(self, root: Path, *, max_output_chars: int = MAX_TOOL_OUTPUT_CHARS):
         self.root = root.expanduser().resolve()
         if not self.root.is_dir():
@@ -327,9 +558,14 @@ class WorkspaceTools:
         if type(max_output_chars) is not int or max_output_chars < 64:
             raise ValueError("max_output_chars must be an integer >= 64")
         self.max_output_chars = max_output_chars
+        self._results: dict[str, tuple[str, str, bool]] = {}
+        self._result_counter = 0
         obj = {"type": "object", "additionalProperties": False}
         self._tools = {
             tool.name: tool for tool in (
+                Tool("current_directory", "Return the configured workspace path.", {
+                    **obj, "properties": {},
+                }, self._current_directory),
                 Tool("list_directory", (
                     "List files under the workspace. Use path='.' for the "
                     "workspace root; never ask the user for the current path."), {
@@ -354,6 +590,15 @@ class WorkspaceTools:
                 Tool("git_status", "Show concise git branch and worktree status.", {
                     **obj, "properties": {},
                 }, self._git_status),
+                Tool("read_result_page", (
+                    "Read another character page from a prior typed tool result."
+                ), {
+                    **obj, "properties": {
+                        "ref": {"type": "string"},
+                        "offset": {"type": "integer", "default": 0},
+                        "max_chars": {"type": "integer", "default": 800}},
+                    "required": ["ref"],
+                }, self._read_result_page),
                 Tool("write_file", "Write a small UTF-8 file in the workspace.", {
                     **obj, "properties": {
                         "path": {"type": "string"},
@@ -376,6 +621,61 @@ class WorkspaceTools:
     @property
     def names(self) -> tuple[str, ...]:
         return tuple(self._tools)
+
+    def names_for_profile(self, profile: str) -> tuple[str, ...]:
+        try:
+            return self._PROFILES[profile]
+        except KeyError as error:
+            raise ValueError(f"unknown tool schema profile: {profile}") from error
+
+    def definitions_for_profile(self, profile: str) -> list[dict]:
+        return [self._tools[name].definition()
+                for name in self.names_for_profile(profile)]
+
+    @classmethod
+    def select_schema_profile(
+        cls, user_text: str, *, has_context: bool = False,
+    ) -> str:
+        """Conservatively omit mutation schemas for clearly scoped requests."""
+        lowered = str(user_text).lower()
+        broad = (
+            "修复", "实现", "开发", "调试", "fix", "implement", "develop",
+            "debug", "refactor")
+        write = (
+            "修改", "写入", "创建", "删除", "替换", "重命名", "edit", "modify",
+            "write", "create", "delete", "remove", "replace", "rename")
+        shell = (
+            "执行", "运行", "命令", "测试", "构建", "编译", "安装", "shell",
+            "command", "run", "test", "build", "compile", "install")
+        read = (
+            "读取", "查看", "显示", "搜索", "查找", "分析", "总结", "read",
+            "show", "view", "search", "find", "analyse", "analyze", "summarize",
+            "explain", "git status", "pwd")
+        if _has_term(lowered, broad):
+            return "all"
+        needs_write = _has_term(lowered, write)
+        needs_shell = _has_term(lowered, shell)
+        if needs_write and needs_shell:
+            return "all"
+        if needs_write:
+            return "read_write"
+        if needs_shell:
+            return "read_shell"
+        if _has_term(lowered, read):
+            return "read_only"
+        contextual_follow_up = (
+            re.match(
+                r"^(?:第\s*[一二两三四五六七八九十\d]+\s*(?:行|项|个)|"
+                r"这(?:一|个|些)?|那(?:一|个|些)?|它|上面|前面|刚才)",
+                lowered) is not None
+            or re.match(
+                r"^(?:what|why|how)\b.*\b(?:it|that|this|above|previous|"
+                r"line|item)\b", lowered) is not None)
+        if has_context and contextual_follow_up:
+            # The prior transcript already contains the evidence. Avoid
+            # spending hundreds of ctx1024 tokens on unrelated tool schemas.
+            return "none"
+        return "all"
 
     def _path(self, value: str, *, for_write: bool = False) -> Path:
         raw = Path(value or ".")
@@ -405,25 +705,49 @@ class WorkspaceTools:
         return f"{call.name}({', '.join(shown)})"
 
     def execute(self, call: ToolCall,
-                approve: Callable[[str], bool] | None = None) -> str:
+                approve: Callable[[str], bool] | None = None,
+                allowed_names: tuple[str, ...] | None = None) -> str:
         tool = self._tools.get(call.name)
         if tool is None:
             return self.result(call.name, False, f"unknown tool; available={self.names}")
+        if allowed_names is not None and call.name not in allowed_names:
+            return self.result(
+                call.name, False,
+                "tool was not disclosed for this request; restate the task "
+                "with an explicit write or command intent")
         if tool.permission == "ask":
             if approve is None or not approve(self.preview(call)):
                 return self.result(call.name, False, "permission denied by user")
         try:
+            if call.name == "read_result_page":
+                return self._page_result(call.arguments)
             output = tool.handler(call.arguments)
-            return self.result(call.name, True, self._clip(output))
+            return self.result(call.name, True, output)
         except (OSError, ValueError, ToolExecutionError, subprocess.SubprocessError) as error:
             return self.result(call.name, False, str(error))
 
-    @staticmethod
-    def result(name: str, ok: bool, output: str) -> str:
+    def result(self, name: str, ok: bool, output: str) -> str:
         # Prevent a file or command from closing the surrounding template tag.
+        payload = {"tool": name, "ok": bool(ok), "output": output}
+        if ok:
+            source_complete = len(output) <= self._MAX_STORED_RESULT_CHARS
+            stored = output[:self._MAX_STORED_RESULT_CHARS]
+            self._result_counter += 1
+            ref = f"r{self._result_counter}"
+            while len(self._results) >= self._MAX_RESULTS:
+                self._results.pop(next(iter(self._results)))
+            result_type = self._RESULT_TYPES.get(name, "text")
+            self._results[ref] = (stored, result_type, source_complete)
+            shown = stored[:self.max_output_chars]
+            truncated = len(stored) > len(shown) or not source_complete
+            payload.update({
+                "type": result_type, "ref": ref, "output": shown,
+                "truncated": truncated,
+                "next_offset": len(shown) if truncated else None,
+                "source_complete": source_complete,
+            })
         encoded = json.dumps(
-            {"tool": name, "ok": bool(ok), "output": output},
-            ensure_ascii=False, separators=(",", ":"))
+            payload, ensure_ascii=False, separators=(",", ":"))
         return encoded.replace("<", "\\u003c")
 
     @staticmethod
@@ -432,7 +756,15 @@ class WorkspaceTools:
         result = json.loads(result_json)
         status = "succeeded" if result["ok"] else "failed"
         output = str(result["output"]).replace("<", "\\u003c")
-        return f"Tool {result['tool']} {status}.\n{output}"
+        reference = ""
+        if result.get("ref"):
+            reference = (
+                f" ref={result['ref']} type={result.get('type', 'text')}.")
+            if result.get("next_offset") is not None:
+                reference += (
+                    f" More is available at offset={result['next_offset']} "
+                    "with read_result_page.")
+        return f"Tool {result['tool']} {status}.{reference}\n{output}"
 
     @staticmethod
     def for_direct(call: ToolCall, result_json: str) -> str:
@@ -454,12 +786,64 @@ class WorkspaceTools:
         output = terminal_safe(str(result["output"]))
         if not result["ok"]:
             return f"{call.name} 失败：{output}"
+
+        def with_page_hint(value: str) -> str:
+            if result.get("next_offset") is None:
+                return value
+            return (
+                f"{value}\n[结果引用 {result['ref']}；继续读取 "
+                f"offset={result['next_offset']}]")
+
         if call.name == "list_directory":
             path = terminal_safe(call.arguments.get("path", "."))
             lines = output.splitlines() or ["[empty directory]"]
-            return f"目录内容（{path}）：\n" + "\n".join(
-                f"  {line}" for line in lines)
-        return output
+            return with_page_hint(
+                f"目录内容（{path}）：\n" + "\n".join(
+                    f"  {line}" for line in lines))
+        if call.name == "current_directory":
+            return with_page_hint(f"当前工作目录：{output}")
+        if call.name == "read_file":
+            path = terminal_safe(call.arguments.get("path", ""))
+            return with_page_hint(f"文件内容（{path}）：\n{output}")
+        if call.name == "search_text":
+            query = terminal_safe(call.arguments.get("query", ""))
+            return with_page_hint(f"搜索结果（{query}）：\n{output}")
+        if call.name == "git_status":
+            return with_page_hint(f"Git 状态：\n{output}")
+        return with_page_hint(output)
+
+    def _page_slice(self, arguments: dict[str, str]):
+        ref = arguments.get("ref", "")
+        if ref not in self._results:
+            raise ToolExecutionError("unknown or expired result reference")
+        source, result_type, source_complete = self._results[ref]
+        offset = _integer(arguments, "offset", 0, 0, len(source))
+        limit = _integer(
+            arguments, "max_chars", self.max_output_chars, 64,
+            self.max_output_chars)
+        end = min(offset + limit, len(source))
+        return ref, source[offset:end], result_type, source_complete, offset, end
+
+    def _read_result_page(self, arguments: dict[str, str]) -> str:
+        return self._page_slice(arguments)[1]
+
+    def _page_result(self, arguments: dict[str, str]) -> str:
+        ref, output, result_type, source_complete, offset, end = \
+            self._page_slice(arguments)
+        truncated = end < len(self._results[ref][0]) or not source_complete
+        payload = {
+            "tool": "read_result_page", "ok": True,
+            "type": result_type, "ref": ref, "offset": offset,
+            "output": output, "truncated": truncated,
+            "next_offset": end if truncated else None,
+            "source_complete": source_complete,
+        }
+        return json.dumps(
+            payload, ensure_ascii=False, separators=(",", ":")).replace(
+                "<", "\\u003c")
+
+    def _current_directory(self, _arguments: dict[str, str]) -> str:
+        return str(self.root)
 
     def _list_directory(self, arguments: dict[str, str]) -> str:
         path = self._path(arguments.get("path", "."))
@@ -492,6 +876,9 @@ class WorkspaceTools:
             raise ToolExecutionError("query is empty")
         base = self._path(arguments.get("path", "."))
         limit = _integer(arguments, "max_matches", 15, 1, 100)
+        native = self._grep_search(query, base, limit)
+        if native is not None:
+            return "\n".join(native) if native else "[no matches]"
         matches = []
         def candidates():
             if base.is_file():
@@ -503,7 +890,9 @@ class WorkspaceTools:
                 dirs[:] = [name for name in dirs
                            if name not in {".git", "__pycache__"}]
                 for name in files:
-                    yield Path(root) / name
+                    candidate = Path(root) / name
+                    if not candidate.is_symlink():
+                        yield candidate
 
         for path in candidates():
             try:
@@ -519,6 +908,54 @@ class WorkspaceTools:
             except (OSError, UnicodeError, ValueError):
                 continue
         return "\n".join(matches) if matches else "[no matches]"
+
+    def _grep_search(self, query: str, base: Path,
+                     limit: int) -> list[str] | None:
+        """Use GNU/BSD grep when available; do not follow workspace symlinks."""
+        try:
+            relative = base.relative_to(self.root)
+        except ValueError:
+            return None
+        target = "." if not relative.parts else str(relative)
+        recursive = ["-r"] if base.is_dir() else []
+        command = [
+            "grep", *recursive, "-nF", "--binary-files=without-match",
+            "--exclude-dir=.git", "--exclude-dir=__pycache__",
+            "--exclude=*.om", "--exclude=*.bin", "--exclude=*.pyc",
+            "--exclude=*.so", "--exclude=*.aarch64", "--", query, target,
+        ]
+        process = None
+        try:
+            process = subprocess.Popen(
+                command, cwd=self.root, text=True, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE)
+            if process.stdout is None:
+                return None
+            matches = []
+            for raw in process.stdout:
+                line = raw.rstrip("\r\n")
+                if line.startswith("./"):
+                    line = line[2:]
+                parts = line.split(":", 2)
+                if len(parts) == 3:
+                    line = f"{parts[0]}:{parts[1]}:{parts[2][:240]}"
+                matches.append(line)
+                if len(matches) >= limit:
+                    process.terminate()
+                    break
+            try:
+                return_code = process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
+                return None
+            if return_code not in {0, 1, -15}:
+                return None
+            return matches
+        except (FileNotFoundError, OSError, subprocess.SubprocessError):
+            if process is not None and process.poll() is None:
+                process.kill()
+            return None
 
     def _git_status(self, _arguments: dict[str, str]) -> str:
         completed = subprocess.run(

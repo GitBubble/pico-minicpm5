@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Strict runtime-profile loader for the dependency-free SS928 application."""
+"""Strict runtime-profile loader for the dependency-free Hi3403 application."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -58,6 +58,8 @@ class RuntimeProfile:
     decode: Path
     prefill: Path
     head: Path
+    kv_output_slots: tuple[int, int]
+    hidden_output_slot: int
     minimum_cosine_exclusive: float
 
     def require_mode(self, mode: str, *, allow_unqualified: bool = False) -> None:
@@ -111,7 +113,7 @@ def load_runtime_profile(value: str, profiles_dir: Path) -> RuntimeProfile:
         raise ProfileError(f"runtime profile must use schema {SCHEMA}")
     expected = {
         "schema", "name", "status", "context", "capabilities", "generation",
-        "agent", "models", "numeric_gate",
+        "agent", "models", "transformer_outputs", "numeric_gate",
     }
     if set(raw) != expected:
         raise ProfileError(
@@ -175,6 +177,14 @@ def load_runtime_profile(value: str, profiles_dir: Path) -> RuntimeProfile:
     models = raw["models"]
     if not isinstance(models, dict) or set(models) != {"decode", "prefill", "head"}:
         raise ProfileError("models must contain decode, prefill and head")
+    outputs = raw["transformer_outputs"]
+    if not isinstance(outputs, dict) or set(outputs) != {"k", "v", "hidden"}:
+        raise ProfileError("transformer_outputs must contain k, v and hidden")
+    k_slot = _integer(outputs["k"], "transformer_outputs.k", 0, 2)
+    v_slot = _integer(outputs["v"], "transformer_outputs.v", 0, 2)
+    hidden_slot = _integer(outputs["hidden"], "transformer_outputs.hidden", 0, 2)
+    if {k_slot, v_slot, hidden_slot} != {0, 1, 2}:
+        raise ProfileError("transformer output slots must be distinct and cover 0,1,2")
     gate = raw["numeric_gate"]
     if not isinstance(gate, dict) or set(gate) != {"minimum_cosine_exclusive"}:
         raise ProfileError("numeric_gate fields mismatch")
@@ -193,5 +203,6 @@ def load_runtime_profile(value: str, profiles_dir: Path) -> RuntimeProfile:
         decode=_relative_path(models["decode"], "models.decode"),
         prefill=_relative_path(models["prefill"], "models.prefill"),
         head=_relative_path(models["head"], "models.head"),
+        kv_output_slots=(k_slot, v_slot), hidden_output_slot=hidden_slot,
         minimum_cosine_exclusive=float(threshold),
     )

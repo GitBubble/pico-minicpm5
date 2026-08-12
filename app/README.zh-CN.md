@@ -1,4 +1,4 @@
-# 在 SS928 板端直接运行预编译 Demo
+# 在 Hi3403 板端直接运行预编译 Demo
 
 [English](README.md)
 
@@ -27,7 +27,7 @@
 └── assets/{token_embedding.f16.bin,tokenizer.json}
 ```
 
-有授权的 SS928 运行库默认位于 `/root/pico_default_smoke/lib`。它们由板端
+有授权的 Hi3403 运行库默认位于 `/root/pico_default_smoke/lib`。它们由板端
 SDK 环境提供，开源仓库和 Release 不会重新分发这些动态库。
 
 ## 直接运行
@@ -49,12 +49,12 @@ chmod +x app/chat.sh app/agent.sh app/bin/pico_persistent_acl_executor.aarch64
 
 ```text
         /\_/\
-       ( o.o )    MiniCPM 5
-        > ^ <     SS928 local AI
-     ctx1024 · resident KV · streaming
+       ( o.o )    HiAgent
+        > ^ <     Hi3403 端侧 AI
+     本地运行 · 隐私安全 · 实时响应
 
 ⠹ Loading three resident model handles  6.4s
-✓ ready · loaded 3 handles · ctx1024 · 10.2s
+✓ ready · loaded 3 handles · ctx1024 · 7.4s
 Agent ready · /help · /tools · /think on|off · /context · /clear · /quit
 You ❯ 读取 README.md 的前 20 行并概括项目用途。
 ⠴ Planning  0.8s
@@ -94,11 +94,67 @@ template，并保留多轮历史直至 `/clear`；`agent.sh` 再加入下面描�
 | `/quit` | 关闭常驻会话；`/exit` 和 Ctrl-D 等价。 |
 
 Agent 已知配置的 workspace 根目录，并以 `path='.'` 表示该目录，因此应主动
-调用工具检查，而不是向用户追问当前路径。明确的目录列举请求会直接路由到只读
-`list_directory` 并显示 `model skipped`；其他工具仍由模型原生选择。当前已验收
+调用工具检查，而不是向用户追问当前路径。明确的当前目录、目录列举、文件行窗口、
+字面搜索和 Git 状态请求会直接路由到只读工具并显示 `model skipped`；总结、
+转换与一般工具选择仍由模型完成。当前已验收
 ctx1024 profile 的单次工具结果
 限制为 800 字符，目录、文件与搜索默认窗口也相应缩小；需要更多信息时应缩小范围
 或继续分页调用。
+
+模型原生请求使用渐进式工具披露。明确只读任务只注入只读 schema；显式写入或
+命令意图才增加对应的权限工具，模糊开发任务保留全量工具作为 fail-safe。成功
+结果携带类型、本地引用、截断状态和下一 offset；`read_result_page` 可读取后续有界
+分页而不重新执行原工具，会话保留最近 16 个结果。
+
+Chat 和 Agent 默认复用 token-exact 的会话 resident K/V，后续轮次只执行新增
+prompt token；`/clear` 会同时清空对话和 resident-prefix 元数据。可用
+`REUSE_SESSION_KV=0 ./app/chat.sh` 或 `REUSE_SESSION_KV=0 ./app/agent.sh`
+回到全量重放，便于对照诊断。板端两轮 Agent A/B 中，复用组与重放组的输出 token
+完全一致，第二轮命中 134-token 前缀，耗时由 `94.94 s` 降至 `80.78 s`。类似
+“第二行有什么作用”且已有上文证据的追问不会再注入无关工具 schema；修改和 shell
+意图仍保持 fail-closed 的权限工具披露。
+
+当前源码还提供按 schema 懒创建的固定 system/tool 前缀快照。新版 executor 通过
+通用 resident-input snapshot/restore opcode 只保存实际使用的 K/V 行；切换工具
+schema 或执行 `/clear` 后可在板内恢复，不把 cache 传回 Python。该路径已通过
+板端 token-exact A/B 并在 Agent 中默认开启：恢复 137-token 前缀仅耗时
+`1.76 ms`，同一条 32-token 请求由 `26.97 s` 降至 `12.56 s`（降低 `53.4%`），
+生成 token ID 与文本完全一致。仅在全量重放诊断时使用
+`FIXED_PREFIX_SNAPSHOTS=0 ./app/agent.sh` 关闭。
+
+Agent 在达到 profile 的 `compact_at_tokens` 时执行确定性 context rebase：原始
+工具输出被替换为带类型的本地引用，保留当前交换和最近对话，并按
+`reserve_tokens` 留出回答空间。报告会记录压缩前后 token 数及被压缩轮数；若当前
+交换本身仍无法放入 context，则 fail closed 并要求缩短输入或 `/clear`。Hi3403
+长会话板端 A/B 的两轮都将 12 个旧工具轮次由 `2808` token 确定性压到 `810`，
+并生成完全相同的 `[18655, 4569, EOS]`。重复运行命中 643-token resident 前缀，
+总耗时由 `69.45 s` 降至 `14.61 s`（`4.75x`）。
+
+已知 prompt token 不再执行词表 head：最后一个 prompt position 之前只运行
+transformer 和 K/V 更新，因为下一个输入 token 已经确定；最后一个 prompt position
+及所有生成 token 仍执行 head 和 argmax。板端输出 token 完全不变，同一首次长
+prompt 由 `86.70 s` 降至 `69.45 s`（降低 `19.89%`），resident-prefix 重复请求由
+`18.17 s` 降至 `14.61 s`（降低 `19.59%`）。逐 position 报告以
+`head_skipped` 标记该路径。
+
+请求报告还会包含 fail-closed 的 `prefill_schedule`。固定策略是
+`S128 -> S32 -> S16 -> strict S1 tail`，但当前已验收 bundle 只启用 S1。不能
+因为目录里出现某个 OM 就选择宽块；每个 context 的产物必须先通过 descriptor、
+公开输出 cosine `>0.98`、K/V 发布、prefill-to-decode handoff、token-exact 和
+Hi3403 板端门禁。
+
+运维人员可在应用启动时传入 `--prefill-activation-manifest`，并同时提供 live
+`--available-bytes`、`--base-resident-bytes`、`--reserve-bytes`，复验可选的
+release-v4 activation；四项必须成组出现。`/profile` 和 JSON 报告会同时显示资格
+状态与实际可执行宽度。typed dispatcher 已通过 fake transport 合同测试，但当前
+Release 没有注册任何 production wide handler：尚无完整宽块 OM 通过发布门禁，
+也没有 CLI 注入入口。因此即便 S16/S32/S128 已通过资格，也不会进入调度器，执行
+仍保持 strict S1，绝不会伪造宽块标签。
+Release-v4 token-exact 证据会绑定实际 head OM 与 embedding；启动时还会在 spawn
+紧前重新哈希它们、两只 S1 route OM、imported protocol runner、executor、两套
+descriptor 和已注册 wide OM。部署树必须可信，并在整个进程生命周期保持只读/不可变；
+该基于路径的 preflight 不宣称能以 inherited-fd handoff 抵抗主动写入者。详见
+[Native prefill 发布资格](../docs/NATIVE_PREFILL_RELEASE_QUALIFICATION.zh-CN.md)。
 
 Agent 的 thinking 默认关闭。可用 `./app/agent.sh --thinking` 或
 `THINKING=1 ./app/agent.sh` 在启动时开启；常驻会话中，`/think` 查看状态，
@@ -112,11 +168,19 @@ token 与工具定义、历史和最终回答共同占用 ctx1024 预算。
 token、工具定义、会话历史和工具结果。上下文不足时 Agent 会先清理较早轮次，
 仍不足则明确要求 `/clear`。每个用户请求默认最多 4 轮工具交互。
 
-颜色和动画默认只在交互式终端开启；重定向、管道和日志输出自动保持为稳定的
-纯文本。可使用 `NO_COLOR=1 ./app/agent.sh` 关闭颜色，或添加
+颜色和动画默认只在交互式终端开启。首次加载模型时，HiAgent 会左右巡视并
+眨眼，MiniCPM 使用更柔和的眨眼动画；动画与原有加载等待并行，不增加启动时间。
+后续规划和生成继续使用单行状态指示，避免覆盖已有对话。重定向、管道和日志输出自动保持为
+稳定的纯文本。可使用 `NO_COLOR=1 ./app/agent.sh` 关闭颜色，或添加
 `--no-spinner` 关闭动画。`--color always|never|auto` 和环境变量
 `PICO_MINICPM5_COLOR` 可显式控制颜色策略。REPL 默认隐藏 executor 的底层加载
 日志，调试时可添加 `--verbose-executor` 恢复显示。
+
+executor 先启动三只 OM 加载，同时解析 tokenizer，将两项独立的冷启动
+开销重叠。已验收 runtime profile 还固定 transformer 输出槽为 K=0、V=1、
+hidden=2，因而移除原先四次 execute、约 0.8 秒的 KV 启动探测。ctx1024 在
+Hi3403 上完整生成冒烟实测加载为 `7.4 s`，优于只做重叠后的 `8.2–8.6 s`
+和原始的 `10.8–11.5 s`。未声明可信槽位合同的 legacy 调用仍保留动态探测回退。
 
 单次非交互执行：
 

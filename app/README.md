@@ -1,4 +1,4 @@
-# Run the prebuilt demo directly on SS928
+# Run the prebuilt demo directly on Hi3403
 
 [中文说明](README.zh-CN.md)
 
@@ -28,7 +28,7 @@ Python package is needed.
 └── assets/{token_embedding.f16.bin,tokenizer.json}
 ```
 
-The licensed SS928 runtime libraries are expected in
+The licensed Hi3403 runtime libraries are expected in
 `/root/pico_default_smoke/lib`. They are supplied by the board SDK and are not
 part of this repository.
 
@@ -51,12 +51,12 @@ chmod +x app/chat.sh app/agent.sh app/bin/pico_persistent_acl_executor.aarch64
 
 ```text
         /\_/\
-       ( o.o )    MiniCPM 5
-        > ^ <     SS928 local AI
-     ctx1024 · resident KV · streaming
+       ( o.o )    HiAgent
+        > ^ <     Hi3403 端侧 AI
+     本地运行 · 隐私安全 · 实时响应
 
 ⠹ Loading three resident model handles  6.4s
-✓ ready · loaded 3 handles · ctx1024 · 10.2s
+✓ ready · loaded 3 handles · ctx1024 · 7.4s
 Agent ready · /help · /tools · /think on|off · /context · /clear · /quit
 You ❯ Read the first 20 lines of README.md and summarize the project.
 ⠴ Planning  0.8s
@@ -99,12 +99,82 @@ the registry, policy and token budget.
 
 The agent knows the configured workspace root and uses `path='.'` for it, so it
 must inspect available paths rather than ask the user for the current directory.
-Unambiguous directory-listing requests are routed directly to the read-only
-`list_directory` tool and displayed with `model skipped`; general tool
-selection remains model-native. The qualified ctx1024 profile caps tool
+Unambiguous requests for the current directory, a directory listing, a literal
+file window, literal text search or Git status are routed directly to read-only
+tools and displayed with `model skipped`; general selection, summaries and
+transformations remain model-native. The qualified ctx1024 profile caps tool
 responses at 800 characters;
 directory, file and search defaults are deliberately small and can be narrowed
 or paged with a follow-up call.
+
+Model-native requests use progressive tool disclosure. Clearly read-only work
+receives only read schemas; explicit write or command intent adds the matching
+permission-gated tool, while ambiguous development tasks retain all tools as a
+fail-safe. Successful results carry a type, local reference, truncation state
+and next offset. `read_result_page` retrieves another bounded page without
+re-running the original operation; the most recent 16 results are retained.
+
+Chat and Agent enable token-exact resident session-K/V reuse by default, so a
+later turn executes only newly appended prompt tokens. `/clear` resets both the
+conversation and resident-prefix metadata. Use `REUSE_SESSION_KV=0
+./app/chat.sh` or `REUSE_SESSION_KV=0 ./app/agent.sh` for a full-replay diagnostic
+baseline. In a two-turn board Agent A/B, reuse was token-exact with replay and a
+134-token prefix hit reduced turn-two latency from `94.94 s` to `80.78 s`.
+Contextual follow-ups such as “what does the second line do?” omit unrelated
+tool schemas when the evidence is already in the transcript; mutation and shell
+intents remain fail-closed behind their permission schemas.
+
+The current source also provides lazy fixed system/tool-prefix snapshots per
+schema. A new generic resident-input snapshot/restore executor opcode stores
+only the K/V rows actually used; schema switches and `/clear` can restore them
+without returning cache bytes to Python. This path is enabled by default for
+Agent after a board token-exact A/B: restoring a 137-token prefix took
+`1.76 ms`, reduced the repeated 32-token request from `26.97 s` to `12.56 s`
+(`53.4%`), and preserved the exact token IDs and text. Use
+`FIXED_PREFIX_SNAPSHOTS=0 ./app/agent.sh` only for a full-replay diagnostic.
+
+At a profile's `compact_at_tokens`, Agent performs deterministic context
+rebase. Raw historical tool output is replaced by its typed local reference,
+the current exchange and recent turns remain byte-exact, and
+`reserve_tokens` preserves response headroom. Reports record token counts
+before/after and the number of compacted turns. If the current exchange alone
+still cannot fit, the runtime fails closed and asks for a shorter request or
+`/clear`. A Hi3403 long-session board A/B compacted 12 old tool turns from
+`2808` to `810` prompt tokens in both runs and produced the exact same
+`[18655, 4569, EOS]` response. On the repeated run, a 643-token resident-prefix
+hit reduced total time from `69.45 s` to `14.61 s` (`4.75x`).
+
+Known prompt tokens do not execute the vocabulary head: until the final prompt
+position, the runtime runs only transformer and K/V update, because each next
+input token is already known. The head and argmax still run on the final prompt
+position and every generated token. This preserved the exact board output
+while reducing the same cold long-prompt request from `86.70 s` to `69.45 s`
+(`19.89%`) and the resident-prefix repeat from `18.17 s` to `14.61 s`
+(`19.59%`). Per-position reports mark this with `head_skipped`.
+
+Request reports also include a fail-closed `prefill_schedule`. Its canonical
+policy is `S128 -> S32 -> S16 -> strict S1 tail`, but the current qualified
+bundle enables only S1. Wider families are never selected merely because an
+OM file exists; each context-specific artifact must first pass descriptor,
+public-output cosine `>0.98`, K/V publication, prefill-to-decode handoff,
+token-exact and Hi3403 board gates.
+
+An operator can verify an optional release-v4 activation at application
+startup with `--prefill-activation-manifest` plus the live
+`--available-bytes`, `--base-resident-bytes` and `--reserve-bytes` values.
+All four options are required together. `/profile` and JSON reports expose
+both qualification state and executable widths. This release has no wide
+production handler registered: the typed dispatcher is fake-transport tested,
+but no complete wide OM has passed release gates and there is no CLI injection
+path. Qualified S16/S32/S128 artifacts therefore remain unavailable to the
+scheduler and execution stays strict S1; no wide label is simulated.
+Release-v4 token-exact evidence binds the actual head OM and embedding, and
+startup rehashes those files with both S1 route OMs, the imported protocol
+runner, executor, descriptors and registered wide OMs immediately before
+spawn. The deployment tree must remain trusted and read-only/immutable for the
+process lifetime; this path-based preflight does not claim an inherited-fd
+handoff against an active writer. See
+[native-prefill release qualification](../docs/NATIVE_PREFILL_RELEASE_QUALIFICATION.md).
 
 Agent thinking is disabled by default. Start it enabled with either
 `./app/agent.sh --thinking` or `THINKING=1 ./app/agent.sh`. During a resident
@@ -120,12 +190,23 @@ the effective output also depends on tool definitions, prompt, history and
 tool results. Older completed turns are cleared when needed; a turn gets at
 most four tool rounds by default.
 
-Colour and animation are enabled only on an interactive terminal. Redirected,
-piped and log output automatically remains stable plain text. Use
+Colour and animation are enabled only on an interactive terminal. During the
+initial model load, HiAgent scans and blinks while MiniCPM uses a gentler blink;
+the animation reuses loading time and adds no startup delay. Later planning and
+generation retain the single-line activity indicator, so old transcript text is
+never overwritten. Redirected, piped and log output remains stable plain text. Use
 `NO_COLOR=1 ./app/agent.sh` to disable colour, or pass `--no-spinner` to disable
 animation. `--color always|never|auto` and `PICO_MINICPM5_COLOR` explicitly
 select the colour policy. The REPL hides low-level executor loading logs by
 default; pass `--verbose-executor` when debugging them.
+
+The executor starts loading all three OMs before the tokenizer is parsed,
+overlapping two independent cold-start costs. Qualified runtime profiles also
+bind transformer output slots as K=0, V=1 and hidden=2, eliminating the former
+four-execute, roughly 0.8-second KV startup probe. The ctx1024 Hi3403 generation
+smoke now loads in `7.4 s`, down from `8.2–8.6 s` after overlap alone and
+`10.8–11.5 s` originally. Legacy model arguments without a trusted slot contract
+retain dynamic probing as a compatibility fallback.
 
 For a single non-interactive prompt:
 

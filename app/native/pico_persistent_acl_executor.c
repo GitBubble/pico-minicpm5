@@ -82,7 +82,43 @@
  *
  * This removes the last host round trip in packed-K/V decode graphs: current
  * rows stay in the executor, while the generic record carries all layout
- * information.  No model-specific dimensions or tensor roles live here.
+ * information.  No model-specific dimensions or tensor roles live here.  The
+ * executor drains, validates and resolves the complete record list before it
+ * touches a destination.  In cached mode every source is invalidated before
+ * the first conversion, and every written destination row is flushed before a
+ * success response.  A destination-flush failure poisons the native session:
+ * an error response is emitted and the process exits so the caller must start
+ * a fresh executor rather than consume potentially incoherent resident state.
+ *
+ * Resident-input snapshots (opcodes 7 and 8):
+ *   save:    opcode(7), model_index, snapshot_id, range_count, zero,
+ *            followed by range_count records:
+ *              u32 input_index, u32 zero, u64 offset, u64 length
+ *   restore: opcode(8), model_index, snapshot_id, zero, zero
+ *
+ * SAVE copies only the named resident-input ranges into a bounded host-memory
+ * slot owned by this executor. RESTORE resolves and validates every destination
+ * before the first copy, then flushes every restored cached range before ACK.
+ * A restore flush failure terminates the session because earlier ranges may
+ * already have changed. This supports immutable prompt-prefix K/V snapshots
+ * without sending cache bytes over the pipe and without encoding any
+ * model-specific layout here.
+ *
+ * Resident input-to-input copy (opcode 9):
+ *   u32 "PEQ1", u16 version, u16 opcode(9), u32 zero,
+ *   u32 record_count, u32 zero, u32 zero,
+ *   followed by record_count fixed 44-byte records:
+ *     u32 destination_model, u32 destination_input, u64 destination_offset,
+ *     u32 source_model, u32 source_input, u64 source_offset,
+ *     u64 length, u32 flags
+ *
+ * flags must be zero.  The executor drains and validates the complete record
+ * list before touching any destination.  Cached source ranges are invalidated
+ * before the copy phase and cached destination ranges are flushed afterwards.
+ * Copies within one input buffer use memmove; copies between buffers use
+ * memcpy.  This operation is scoped to the currently loaded model table: the
+ * protocol has no model-table generation field and makes no cross-generation
+ * validity claim.
  *
  * Opcodes 1 and 2 are untouched and stay wire-compatible, so an older caller
  * keeps working against this binary byte for byte.
@@ -121,12 +157,99 @@
 #define OP_EXECUTE_RESIDENT 4u
 #define OP_ARGMAX 5u
 #define OP_SCATTER_F32_TO_F16 6u
+#define OP_SNAPSHOT_INPUTS 7u
+#define OP_RESTORE_INPUTS 8u
+#define OP_COPY_INPUTS 9u
 #define WRITE_FLAG_PAYLOAD 0u
 #define WRITE_FLAG_CHAIN 1u
 #define MAX_MODELS 128u
 #define MAX_MODEL_IO 64u
+#define SCATTER_F32_TO_F16_RECORD_BYTES 48u
+#define MAX_INPUT_COPY_RECORDS 256u
+#define INPUT_COPY_RECORD_BYTES 44u
+#define MAX_SNAPSHOTS 8u
+#define MAX_SNAPSHOT_RANGES 256u
+#define MAX_SNAPSHOT_BYTES (UINT64_C(64) << 20)
+#define MAX_TOTAL_SNAPSHOT_BYTES (UINT64_C(128) << 20)
 #define MAX_ERROR_BYTES 4096u
 #define MAX_TENSOR_BYTES (UINT64_C(1) << 34)
+
+_Static_assert(SCATTER_F32_TO_F16_RECORD_BYTES == 48u,
+               "resident FP32-to-FP16 scatter record ABI drift");
+_Static_assert(INPUT_COPY_RECORD_BYTES == 44u,
+               "resident input copy record ABI drift");
+
+static uint16_t fp32_to_fp16_rne(float value);
+
+static int scatter_f32_to_f16_bounds_valid(
+    uint64_t destination_base, uint64_t destination_stride,
+    uint32_t channels, uint32_t elements, uint64_t source_capacity,
+    uint64_t destination_capacity, uint64_t *source_bytes_out,
+    uint64_t *row_bytes_out, uint64_t *final_end_out)
+{
+    uint64_t source_elements;
+    uint64_t source_bytes;
+    uint64_t row_bytes;
+    uint64_t final_end;
+    if (channels == 0 || elements == 0 ||
+        (uint64_t)channels >
+            MAX_TENSOR_BYTES / sizeof(float) / (uint64_t)elements) {
+        return 0;
+    }
+    source_elements = (uint64_t)channels * (uint64_t)elements;
+    source_bytes = source_elements * sizeof(float);
+    row_bytes = (uint64_t)elements * sizeof(uint16_t);
+    if ((destination_base & 1u) != 0 ||
+        (destination_stride & 1u) != 0 ||
+        destination_stride < row_bytes || source_bytes > source_capacity ||
+        destination_base > destination_capacity ||
+        row_bytes > destination_capacity - destination_base ||
+        (uint64_t)(channels - 1u) >
+            (destination_capacity - destination_base - row_bytes) /
+                destination_stride) {
+        return 0;
+    }
+    final_end = destination_base +
+        (uint64_t)(channels - 1u) * destination_stride + row_bytes;
+    if (source_bytes_out != NULL) *source_bytes_out = source_bytes;
+    if (row_bytes_out != NULL) *row_bytes_out = row_bytes;
+    if (final_end_out != NULL) *final_end_out = final_end;
+    return 1;
+}
+
+static void scatter_f32_to_f16_rows(
+    unsigned char *destination, const float *source,
+    uint64_t destination_base, uint64_t destination_stride,
+    uint32_t channels, uint32_t elements)
+{
+    size_t channel;
+    size_t element;
+    for (channel = 0; channel < channels; channel++) {
+        uint16_t *row = (uint16_t *)(destination + destination_base +
+            channel * destination_stride);
+        for (element = 0; element < elements; element++) {
+            row[element] = fp32_to_fp16_rne(
+                source[channel * (size_t)elements + element]);
+        }
+    }
+}
+
+static int input_copy_bounds_valid(uint64_t offset, uint64_t capacity,
+                                   uint64_t length)
+{
+    return length != 0 && length <= MAX_TENSOR_BYTES &&
+           offset <= capacity && length <= capacity - offset;
+}
+
+static void copy_input_bytes(unsigned char *destination,
+                             const unsigned char *source, size_t length,
+                             int same_buffer)
+{
+    if (same_buffer)
+        memmove(destination, source, length);
+    else
+        memcpy(destination, source, length);
+}
 
 #ifndef PICO_PERSISTENT_ACL_CONTRACT_ONLY
 typedef struct {
@@ -333,6 +456,24 @@ static int parse_args(int argc, char **argv, executor_options *options)
 int main(void)
 {
     unsigned char bytes[8];
+    unsigned char overlap[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+    unsigned char atomic_destination[4] = {9, 8, 7, 6};
+    const unsigned char atomic_before[4] = {9, 8, 7, 6};
+    const float scatter_source[4] = {1.0f, -2.0f, 0.0f, 65504.0f};
+    uint16_t scatter_destination[6] = {
+        UINT16_C(0xffff), UINT16_C(0xffff), UINT16_C(0xaaaa),
+        UINT16_C(0xaaaa), UINT16_C(0xffff), UINT16_C(0xffff)};
+    const uint16_t scatter_expected[6] = {
+        UINT16_C(0x3c00), UINT16_C(0xc000), UINT16_C(0xaaaa),
+        UINT16_C(0xaaaa), UINT16_C(0x0000), UINT16_C(0x7bff)};
+    uint16_t atomic_scatter_destination[4] = {
+        UINT16_C(9), UINT16_C(8), UINT16_C(7), UINT16_C(6)};
+    const uint16_t atomic_scatter_before[4] = {
+        UINT16_C(9), UINT16_C(8), UINT16_C(7), UINT16_C(6)};
+    uint64_t scatter_source_bytes = 0;
+    uint64_t scatter_row_bytes = 0;
+    uint64_t scatter_final_end = 0;
+    int all_valid;
     const uint64_t probe = UINT64_C(0xfedcba9876543210);
     put_u64(bytes, probe);
     if (get_u64(bytes) != probe) return 1;
@@ -349,12 +490,74 @@ int main(void)
         fp32_to_fp16_rne(0x1.006p0f) != UINT16_C(0x3c02) ||
         fp32_to_fp16_rne(0x1p-24f) != UINT16_C(0x0001) ||
         fp32_to_fp16_rne(0x1p-25f) != UINT16_C(0x0000)) return 1;
+    if (!input_copy_bounds_valid(4, 8, 4) ||
+        input_copy_bounds_valid(5, 8, 4) ||
+        input_copy_bounds_valid(0, 8, 0) ||
+        input_copy_bounds_valid(UINT64_MAX, UINT64_MAX, 2)) return 1;
+    copy_input_bytes(overlap + 2, overlap, 6, 1);
+    if (memcmp(overlap, (const unsigned char[]){0, 1, 0, 1, 2, 3, 4, 5},
+               sizeof(overlap)) != 0) return 1;
+    /* Mirror the request handler's validate-all-before-copy invariant: the
+     * invalid second range prevents even the valid first range from writing. */
+    all_valid = input_copy_bounds_valid(0, 4, 2) &&
+                input_copy_bounds_valid(3, 4, 2);
+    if (all_valid)
+        copy_input_bytes(atomic_destination, bytes, 2, 0);
+    if (memcmp(atomic_destination, atomic_before,
+               sizeof(atomic_destination)) != 0) return 1;
+    if (!scatter_f32_to_f16_bounds_valid(
+            0, 8, 2, 2, sizeof(scatter_source),
+            sizeof(scatter_destination), &scatter_source_bytes,
+            &scatter_row_bytes, &scatter_final_end) ||
+        scatter_source_bytes != sizeof(scatter_source) ||
+        scatter_row_bytes != 2 * sizeof(uint16_t) ||
+        scatter_final_end != sizeof(scatter_destination) ||
+        scatter_f32_to_f16_bounds_valid(
+            1, 8, 2, 2, sizeof(scatter_source),
+            sizeof(scatter_destination), NULL, NULL, NULL) ||
+        scatter_f32_to_f16_bounds_valid(
+            0, 8, 2, 2, sizeof(scatter_source) - 1,
+            sizeof(scatter_destination), NULL, NULL, NULL) ||
+        scatter_f32_to_f16_bounds_valid(
+            0, UINT64_MAX - 1u, UINT32_MAX, UINT32_MAX,
+            UINT64_MAX, UINT64_MAX, NULL, NULL, NULL)) return 1;
+    scatter_f32_to_f16_rows(
+        (unsigned char *)scatter_destination, scatter_source, 0, 8, 2, 2);
+    if (memcmp(scatter_destination, scatter_expected,
+               sizeof(scatter_destination)) != 0) return 1;
+    /* Mirror opcode 6's validate-all-before-convert invariant: the invalid
+     * second destination suppresses the otherwise valid first record. */
+    all_valid = scatter_f32_to_f16_bounds_valid(
+                    0, 4, 1, 2, 2 * sizeof(float),
+                    sizeof(atomic_scatter_destination), NULL, NULL, NULL) &&
+                scatter_f32_to_f16_bounds_valid(
+                    4, 4, 2, 2, sizeof(scatter_source),
+                    sizeof(atomic_scatter_destination), NULL, NULL, NULL);
+    if (all_valid) {
+        scatter_f32_to_f16_rows(
+            (unsigned char *)atomic_scatter_destination, scatter_source,
+            0, 4, 1, 2);
+    }
+    if (memcmp(atomic_scatter_destination, atomic_scatter_before,
+               sizeof(atomic_scatter_destination)) != 0) return 1;
     printf("{\"schema\":\"pico.persistent_acl_executor.protocol.v1\","
            "\"byte_order\":\"little\",\"model_limit\":%u,"
            "\"io_limit\":%u,\"resident_scatter_f32_to_f16\":true,"
+           "\"resident_scatter_record_bytes\":%u,"
+           "\"resident_scatter_validate_all\":true,"
+           "\"resident_scatter_flush_failure_fatal\":true,"
+           "\"resident_input_snapshots\":true,"
+           "\"resident_snapshot_restore_validate_all\":true,"
+           "\"resident_snapshot_restore_flush_failure_fatal\":true,"
+           "\"resident_input_copy\":true,"
+           "\"resident_input_copy_opcode\":%u,"
+           "\"resident_input_copy_record_bytes\":%u,"
+           "\"resident_input_copy_generation_guard\":false,"
            "\"self_test\":true,"
            "\"model_execution\":false}\n",
-           MAX_MODELS, MAX_MODEL_IO);
+           MAX_MODELS, MAX_MODEL_IO, SCATTER_F32_TO_F16_RECORD_BYTES,
+           OP_COPY_INPUTS,
+           INPUT_COPY_RECORD_BYTES);
     return 0;
 }
 
@@ -384,6 +587,51 @@ typedef struct {
     size_t input_sizes[MAX_MODEL_IO];
     size_t output_sizes[MAX_MODEL_IO];
 } persistent_model;
+
+typedef struct {
+    uint32_t input_index;
+    uint64_t offset;
+    uint64_t length;
+    uint64_t data_offset;
+} resident_snapshot_range;
+
+typedef struct {
+    int valid;
+    uint32_t model_index;
+    size_t range_count;
+    size_t byte_count;
+    resident_snapshot_range ranges[MAX_SNAPSHOT_RANGES];
+    unsigned char *bytes;
+} resident_snapshot;
+
+typedef struct {
+    uint32_t destination_model;
+    uint32_t destination_input;
+    uint64_t destination_offset;
+    uint32_t source_model;
+    uint32_t source_input;
+    uint64_t source_offset;
+    uint64_t length;
+    unsigned char *destination;
+    const unsigned char *source;
+    int same_buffer;
+} resident_input_copy;
+
+typedef struct {
+    uint32_t destination_input;
+    uint32_t source_model;
+    uint32_t source_output;
+    uint64_t destination_base;
+    uint64_t destination_stride;
+    uint32_t channels;
+    uint32_t elements;
+    uint64_t source_bytes;
+    uint64_t row_bytes;
+    uint64_t final_end;
+    size_t source_capacity;
+    unsigned char *destination;
+    const float *source;
+} resident_scatter_f32_to_f16;
 
 static svp_acl_error malloc_svp(void **pointer, size_t size, int cached)
 {
@@ -690,8 +938,14 @@ static int discard_bytes(uint64_t bytes)
     return 0;
 }
 
+static void destroy_snapshot(resident_snapshot *snapshot)
+{
+    free(snapshot->bytes);
+    memset(snapshot, 0, sizeof(*snapshot));
+}
+
 static int serve_request(persistent_model *models, size_t model_count,
-                         int cached)
+                         int cached, resident_snapshot *snapshots)
 {
     unsigned char header[24];
     uint64_t input_sizes[MAX_MODEL_IO] = {0};
@@ -726,6 +980,336 @@ static int serve_request(persistent_model *models, size_t model_count,
             return -1;
         if (write_response_header(0, 0, 0, NULL) != 0) return -1;
         return 1;
+    }
+    if (opcode == OP_SNAPSHOT_INPUTS) {
+        resident_snapshot_range ranges[MAX_SNAPSHOT_RANGES];
+        unsigned char *copy = NULL;
+        uint64_t byte_count = 0;
+        uint64_t total_snapshot_bytes = 0;
+        size_t range_count = output_count;
+        size_t range_index;
+        uint32_t snapshot_id = input_count;
+        if (write_count != 0 || snapshot_id == 0 ||
+            snapshot_id > MAX_SNAPSHOTS || range_count == 0 ||
+            range_count > MAX_SNAPSHOT_RANGES) return -1;
+        memset(ranges, 0, sizeof(ranges));
+        if (model_index >= model_count) {
+            valid = 0;
+            snprintf(error, sizeof(error),
+                     "snapshot model %u is out of range", model_index);
+        }
+        for (range_index = 0; range_index < range_count; range_index++) {
+            unsigned char record[24];
+            uint32_t input_index;
+            uint32_t flags;
+            uint64_t offset;
+            uint64_t length;
+            if (read_exact_fd(STDIN_FILENO, record, sizeof(record)) != 0)
+                return -1;
+            input_index = get_u32(record);
+            flags = get_u32(record + 4);
+            offset = get_u64(record + 8);
+            length = get_u64(record + 16);
+            ranges[range_index].input_index = input_index;
+            ranges[range_index].offset = offset;
+            ranges[range_index].length = length;
+            ranges[range_index].data_offset = byte_count;
+            if (flags != 0 || length == 0 ||
+                byte_count > MAX_SNAPSHOT_BYTES ||
+                length > MAX_SNAPSHOT_BYTES - byte_count) {
+                if (valid) {
+                    valid = 0;
+                    snprintf(error, sizeof(error),
+                             "snapshot range %zu has invalid flags or size",
+                             range_index);
+                }
+                continue;
+            }
+            byte_count += length;
+            if (model_index >= model_count ||
+                input_index >= models[model_index].input_count ||
+                offset > models[model_index].input_sizes[input_index] ||
+                length > models[model_index].input_sizes[input_index] -
+                    offset) {
+                if (valid) {
+                    valid = 0;
+                    snprintf(error, sizeof(error),
+                             "snapshot range %zu exceeds model %u input %u",
+                             range_index, model_index, input_index);
+                }
+            }
+        }
+        if (valid) {
+            for (range_index = 0; range_index < MAX_SNAPSHOTS;
+                 range_index++) {
+                if (range_index != snapshot_id - 1u &&
+                    snapshots[range_index].valid) {
+                    total_snapshot_bytes += snapshots[range_index].byte_count;
+                }
+            }
+            if (byte_count > MAX_TOTAL_SNAPSHOT_BYTES ||
+                total_snapshot_bytes >
+                    MAX_TOTAL_SNAPSHOT_BYTES - byte_count) {
+                valid = 0;
+                snprintf(error, sizeof(error),
+                         "resident snapshot budget would exceed %" PRIu64
+                         " bytes", MAX_TOTAL_SNAPSHOT_BYTES);
+            }
+        }
+        if (valid) {
+            copy = (unsigned char *)malloc((size_t)byte_count);
+            if (copy == NULL) {
+                valid = 0;
+                snprintf(error, sizeof(error),
+                         "could not allocate %" PRIu64
+                         " bytes for snapshot %u", byte_count, snapshot_id);
+            }
+        }
+        if (valid) {
+            for (range_index = 0; range_index < range_count; range_index++) {
+                svp_acl_data_buffer *buffer =
+                    svp_acl_mdl_get_dataset_buffer(
+                        models[model_index].inputs,
+                        ranges[range_index].input_index);
+                const unsigned char *address =
+                    (const unsigned char *)svp_acl_get_data_buffer_addr(buffer);
+                if (address == NULL) {
+                    valid = 0;
+                    snprintf(error, sizeof(error),
+                             "snapshot range %zu input buffer is unavailable",
+                             range_index);
+                    break;
+                }
+                memcpy(copy + ranges[range_index].data_offset,
+                       address + ranges[range_index].offset,
+                       (size_t)ranges[range_index].length);
+            }
+        }
+        if (!valid) {
+            free(copy);
+            return write_response_header(1, model_index, 0, error);
+        }
+        destroy_snapshot(&snapshots[snapshot_id - 1u]);
+        snapshots[snapshot_id - 1u].valid = 1;
+        snapshots[snapshot_id - 1u].model_index = model_index;
+        snapshots[snapshot_id - 1u].range_count = range_count;
+        snapshots[snapshot_id - 1u].byte_count = (size_t)byte_count;
+        snapshots[snapshot_id - 1u].bytes = copy;
+        memcpy(snapshots[snapshot_id - 1u].ranges, ranges,
+               range_count * sizeof(ranges[0]));
+        return write_response_header(0, model_index, 0, NULL);
+    }
+    if (opcode == OP_RESTORE_INPUTS) {
+        uint32_t snapshot_id = input_count;
+        resident_snapshot *snapshot;
+        unsigned char *destinations[MAX_SNAPSHOT_RANGES] = {0};
+        size_t range_index;
+        if (output_count != 0 || write_count != 0 || snapshot_id == 0 ||
+            snapshot_id > MAX_SNAPSHOTS) return -1;
+        snapshot = &snapshots[snapshot_id - 1u];
+        if (model_index >= model_count || !snapshot->valid ||
+            snapshot->model_index != model_index) {
+            snprintf(error, sizeof(error),
+                     "snapshot %u is unavailable for model %u",
+                     snapshot_id, model_index);
+            return write_response_header(1, model_index, 0, error);
+        }
+        if (snapshot->bytes == NULL || snapshot->range_count == 0 ||
+            snapshot->range_count > MAX_SNAPSHOT_RANGES) {
+            snprintf(error, sizeof(error),
+                     "snapshot %u has an invalid resident payload",
+                     snapshot_id);
+            return write_response_header(1, model_index, 0, error);
+        }
+        /* Resolve and validate the complete destination set before changing
+         * any resident byte.  Snapshot metadata is executor-owned, but this
+         * revalidation also protects against a malformed/stale in-memory slot. */
+        for (range_index = 0; range_index < snapshot->range_count;
+             range_index++) {
+            resident_snapshot_range *range = &snapshot->ranges[range_index];
+            svp_acl_data_buffer *buffer;
+            if (range->input_index >= models[model_index].input_count ||
+                range->length == 0 ||
+                range->offset >
+                    models[model_index].input_sizes[range->input_index] ||
+                range->length >
+                    models[model_index].input_sizes[range->input_index] -
+                    range->offset ||
+                range->data_offset > snapshot->byte_count ||
+                range->length > snapshot->byte_count - range->data_offset) {
+                snprintf(error, sizeof(error),
+                         "snapshot %u restore range %zu is invalid",
+                         snapshot_id, range_index);
+                return write_response_header(1, model_index, 0, error);
+            }
+            buffer = svp_acl_mdl_get_dataset_buffer(
+                models[model_index].inputs, range->input_index);
+            destinations[range_index] =
+                (unsigned char *)svp_acl_get_data_buffer_addr(buffer);
+            if (destinations[range_index] == NULL) {
+                snprintf(error, sizeof(error),
+                         "snapshot %u restore buffer %zu is unavailable",
+                         snapshot_id, range_index);
+                return write_response_header(1, model_index, 0, error);
+            }
+        }
+        for (range_index = 0; range_index < snapshot->range_count;
+             range_index++) {
+            resident_snapshot_range *range = &snapshot->ranges[range_index];
+            memcpy(destinations[range_index] + range->offset,
+                   snapshot->bytes + range->data_offset,
+                   (size_t)range->length);
+        }
+        if (cached) {
+            for (range_index = 0; range_index < snapshot->range_count;
+                 range_index++) {
+                resident_snapshot_range *range =
+                    &snapshot->ranges[range_index];
+                if (svp_acl_rt_mem_flush(
+                        destinations[range_index] + range->offset,
+                        (size_t)range->length) != SVP_ACL_SUCCESS) {
+                    snprintf(error, sizeof(error),
+                             "snapshot %u restore range %zu could not flush",
+                             snapshot_id, range_index);
+                    if (write_response_header(
+                            2, model_index, 0, error) != 0) return -1;
+                    return -2;
+                }
+            }
+        }
+        return write_response_header(0, model_index, 0, NULL);
+    }
+    if (opcode == OP_COPY_INPUTS) {
+        resident_input_copy records[MAX_INPUT_COPY_RECORDS];
+        size_t record_count = input_count;
+        size_t record_index;
+        if (model_index != 0 || output_count != 0 || write_count != 0 ||
+            record_count == 0 || record_count > MAX_INPUT_COPY_RECORDS)
+            return -1;
+        memset(records, 0, sizeof(records));
+        for (record_index = 0; record_index < record_count; record_index++) {
+            unsigned char record[INPUT_COPY_RECORD_BYTES];
+            uint32_t flags;
+            int record_valid = 1;
+            const char *record_error = NULL;
+            persistent_model *destination_model = NULL;
+            persistent_model *source_model = NULL;
+            svp_acl_data_buffer *destination_buffer = NULL;
+            svp_acl_data_buffer *source_buffer = NULL;
+            unsigned char *destination_base = NULL;
+            const unsigned char *source_base = NULL;
+            if (read_exact_fd(STDIN_FILENO, record, sizeof(record)) != 0)
+                return -1;
+            records[record_index].destination_model = get_u32(record);
+            records[record_index].destination_input = get_u32(record + 4);
+            records[record_index].destination_offset = get_u64(record + 8);
+            records[record_index].source_model = get_u32(record + 16);
+            records[record_index].source_input = get_u32(record + 20);
+            records[record_index].source_offset = get_u64(record + 24);
+            records[record_index].length = get_u64(record + 32);
+            flags = get_u32(record + 40);
+
+            if (flags != 0 || records[record_index].length == 0 ||
+                records[record_index].length > MAX_TENSOR_BYTES) {
+                record_valid = 0;
+                record_error = "has invalid flags or length";
+            } else if (records[record_index].destination_model >= model_count ||
+                       records[record_index].source_model >= model_count) {
+                record_valid = 0;
+                record_error = "names a model outside the current table";
+            } else {
+                destination_model =
+                    &models[records[record_index].destination_model];
+                source_model = &models[records[record_index].source_model];
+                if (records[record_index].destination_input >=
+                        destination_model->input_count ||
+                    records[record_index].source_input >=
+                        source_model->input_count) {
+                    record_valid = 0;
+                    record_error = "names an input outside its model";
+                } else if (!input_copy_bounds_valid(
+                               records[record_index].destination_offset,
+                               destination_model->input_sizes[
+                                   records[record_index].destination_input],
+                               records[record_index].length) ||
+                           !input_copy_bounds_valid(
+                               records[record_index].source_offset,
+                               source_model->input_sizes[
+                                   records[record_index].source_input],
+                               records[record_index].length)) {
+                    record_valid = 0;
+                    record_error = "exceeds source or destination input";
+                }
+            }
+            if (record_valid) {
+                destination_buffer = svp_acl_mdl_get_dataset_buffer(
+                    destination_model->inputs,
+                    records[record_index].destination_input);
+                source_buffer = svp_acl_mdl_get_dataset_buffer(
+                    source_model->inputs,
+                    records[record_index].source_input);
+                destination_base = (unsigned char *)
+                    svp_acl_get_data_buffer_addr(destination_buffer);
+                source_base = (const unsigned char *)
+                    svp_acl_get_data_buffer_addr(source_buffer);
+                if (destination_base == NULL || source_base == NULL) {
+                    record_valid = 0;
+                    record_error = "has an unavailable input buffer";
+                }
+            }
+            if (record_valid) {
+                records[record_index].destination = destination_base;
+                records[record_index].source = source_base;
+                records[record_index].same_buffer =
+                    destination_base == source_base;
+            } else if (valid) {
+                valid = 0;
+                snprintf(error, sizeof(error),
+                         "input copy record %zu %s", record_index,
+                         record_error == NULL ? "is invalid" : record_error);
+            }
+        }
+        if (!valid)
+            return write_response_header(1, 0, 0, error);
+
+        /* Complete all cached-source synchronization before the first write.
+         * A failure here therefore preserves every destination byte. */
+        if (cached) {
+            for (record_index = 0; record_index < record_count;
+                 record_index++) {
+                resident_input_copy *record = &records[record_index];
+                if (svp_acl_rt_mem_invalidate(
+                        (void *)(record->source + record->source_offset),
+                        (size_t)record->length) != SVP_ACL_SUCCESS) {
+                    snprintf(error, sizeof(error),
+                             "input copy record %zu could not invalidate "
+                             "source", record_index);
+                    return write_response_header(2, 0, 0, error);
+                }
+            }
+        }
+        for (record_index = 0; record_index < record_count; record_index++) {
+            resident_input_copy *record = &records[record_index];
+            copy_input_bytes(
+                record->destination + record->destination_offset,
+                record->source + record->source_offset,
+                (size_t)record->length, record->same_buffer);
+        }
+        if (cached) {
+            for (record_index = 0; record_index < record_count;
+                 record_index++) {
+                resident_input_copy *record = &records[record_index];
+                if (svp_acl_rt_mem_flush(
+                        record->destination + record->destination_offset,
+                        (size_t)record->length) != SVP_ACL_SUCCESS) {
+                    snprintf(error, sizeof(error),
+                             "input copy record %zu could not flush "
+                             "destination", record_index);
+                    return write_response_header(2, 0, 0, error);
+                }
+            }
+        }
+        return write_response_header(0, 0, 0, NULL);
     }
     if (opcode == OP_ARGMAX) {
         unsigned char payload[8];
@@ -777,121 +1361,158 @@ static int serve_request(persistent_model *models, size_t model_count,
         return write_exact_fd(protocol_output_fd, payload, sizeof(payload));
     }
     if (opcode == OP_SCATTER_F32_TO_F16) {
+        resident_scatter_f32_to_f16 records[MAX_MODEL_IO];
+        size_t record_count = input_count;
         size_t record_index;
-        if (output_count != 0 || write_count != 0 ||
-            input_count == 0 || input_count > MAX_MODEL_IO) return -1;
-        if (model_index >= model_count) {
+        /* An unbounded count is a framing failure and closes the stream.  All
+         * bounded semantic failures below still drain their complete 48-byte
+         * record list, return an error frame and leave the next request aligned. */
+        if (record_count > MAX_MODEL_IO) return -1;
+        memset(records, 0, sizeof(records));
+        if (output_count != 0 || record_count == 0) {
             valid = 0;
             snprintf(error, sizeof(error),
-                     "scatter destination model %u is out of range",
-                     model_index);
+                     "scatter frame requires records and no outputs");
         }
-        for (record_index = 0; record_index < input_count; record_index++) {
-            unsigned char record[48];
-            uint32_t destination_input;
-            uint32_t source_model;
-            uint32_t source_output;
+        for (record_index = 0; record_index < record_count; record_index++) {
+            resident_scatter_f32_to_f16 *scatter = &records[record_index];
+            unsigned char record[SCATTER_F32_TO_F16_RECORD_BYTES];
             uint32_t flags;
-            uint64_t destination_base;
-            uint64_t destination_stride;
-            uint32_t channels;
-            uint32_t elements;
-            uint64_t source_elements;
-            uint64_t row_bytes;
-            uint64_t final_end;
-            const float *source = NULL;
-            unsigned char *destination = NULL;
-            size_t channel;
-            size_t element;
+            int record_valid = 1;
+            const char *record_error = NULL;
+            persistent_model *destination_model = NULL;
+            persistent_model *source_model = NULL;
+            svp_acl_data_buffer *destination_buffer = NULL;
+            svp_acl_data_buffer *source_buffer = NULL;
             if (read_exact_fd(STDIN_FILENO, record, sizeof(record)) != 0)
                 return -1;
-            destination_input = get_u32(record);
-            source_model = get_u32(record + 4);
-            source_output = get_u32(record + 8);
+            scatter->destination_input = get_u32(record);
+            scatter->source_model = get_u32(record + 4);
+            scatter->source_output = get_u32(record + 8);
             flags = get_u32(record + 12);
-            destination_base = get_u64(record + 16);
-            destination_stride = get_u64(record + 24);
-            channels = get_u32(record + 32);
-            elements = get_u32(record + 36);
+            scatter->destination_base = get_u64(record + 16);
+            scatter->destination_stride = get_u64(record + 24);
+            scatter->channels = get_u32(record + 32);
+            scatter->elements = get_u32(record + 36);
             if (flags != 0 || get_u64(record + 40) != 0 ||
-                channels == 0 || elements == 0) {
-                if (valid) {
-                    valid = 0;
-                    snprintf(error, sizeof(error),
-                             "scatter record %zu has invalid flags or shape",
-                             record_index);
+                scatter->channels == 0 || scatter->elements == 0) {
+                record_valid = 0;
+                record_error = "has invalid flags or shape";
+            } else if (model_index >= model_count ||
+                       scatter->source_model >= model_count) {
+                record_valid = 0;
+                record_error = "names a model outside the current table";
+            } else {
+                destination_model = &models[model_index];
+                source_model = &models[scatter->source_model];
+                if (scatter->destination_input >=
+                        destination_model->input_count ||
+                    scatter->source_output >= source_model->output_count) {
+                    record_valid = 0;
+                    record_error = "names an input or output outside its model";
+                } else if (!scatter_f32_to_f16_bounds_valid(
+                               scatter->destination_base,
+                               scatter->destination_stride,
+                               scatter->channels, scatter->elements,
+                               source_model->output_sizes[
+                                   scatter->source_output],
+                               destination_model->input_sizes[
+                                   scatter->destination_input],
+                               &scatter->source_bytes, &scatter->row_bytes,
+                               &scatter->final_end)) {
+                    record_valid = 0;
+                    record_error = "exceeds source or destination";
                 }
-                continue;
             }
-            source_elements = (uint64_t)channels * elements;
-            row_bytes = (uint64_t)elements * sizeof(uint16_t);
-            if (source_elements > MAX_TENSOR_BYTES / sizeof(float) ||
-                (destination_base & 1u) != 0 ||
-                (destination_stride & 1u) != 0 ||
-                destination_stride < row_bytes ||
-                destination_base > UINT64_MAX - row_bytes ||
-                (uint64_t)(channels - 1u) >
-                    (UINT64_MAX - destination_base - row_bytes) /
-                    destination_stride) {
-                if (valid) {
-                    valid = 0;
-                    snprintf(error, sizeof(error),
-                             "scatter record %zu shape overflows",
-                             record_index);
+            if (record_valid) {
+                source_buffer = svp_acl_mdl_get_dataset_buffer(
+                    source_model->outputs, scatter->source_output);
+                destination_buffer = svp_acl_mdl_get_dataset_buffer(
+                    destination_model->inputs, scatter->destination_input);
+                if (source_buffer == NULL || destination_buffer == NULL) {
+                    record_valid = 0;
+                    record_error = "has an unavailable buffer";
+                } else {
+                    scatter->source = (const float *)
+                        svp_acl_get_data_buffer_addr(source_buffer);
+                    scatter->destination = (unsigned char *)
+                        svp_acl_get_data_buffer_addr(destination_buffer);
+                    if (scatter->source == NULL ||
+                        scatter->destination == NULL) {
+                        record_valid = 0;
+                        record_error = "has an unavailable buffer";
+                    } else {
+                        scatter->source_capacity =
+                            source_model->output_sizes[scatter->source_output];
+                    }
                 }
-                continue;
             }
-            final_end = destination_base +
-                (uint64_t)(channels - 1u) * destination_stride + row_bytes;
-            if (!valid || model_index >= model_count ||
-                destination_input >= models[model_index].input_count ||
-                source_model >= model_count ||
-                source_output >= models[source_model].output_count ||
-                source_elements * sizeof(float) >
-                    models[source_model].output_sizes[source_output] ||
-                final_end > models[model_index].input_sizes[destination_input]) {
-                if (valid) {
-                    valid = 0;
-                    snprintf(error, sizeof(error),
-                             "scatter record %zu exceeds source or destination",
-                             record_index);
-                }
-                continue;
-            }
-            source = (const float *)svp_acl_get_data_buffer_addr(
-                svp_acl_mdl_get_dataset_buffer(models[source_model].outputs,
-                                               source_output));
-            destination = (unsigned char *)svp_acl_get_data_buffer_addr(
-                svp_acl_mdl_get_dataset_buffer(models[model_index].inputs,
-                                               destination_input));
-            if (source == NULL || destination == NULL) {
+            if (!record_valid && valid) {
                 valid = 0;
-                snprintf(error, sizeof(error),
-                         "scatter record %zu buffer is unavailable",
-                         record_index);
-                continue;
-            }
-            if (cached && svp_acl_rt_mem_invalidate(
-                    (void *)source,
-                    models[source_model].output_sizes[source_output])
-                    != SVP_ACL_SUCCESS) {
-                valid = 0;
-                snprintf(error, sizeof(error),
-                         "scatter record %zu could not invalidate source",
-                         record_index);
-                continue;
-            }
-            for (channel = 0; channel < channels; channel++) {
-                uint16_t *row = (uint16_t *)(destination + destination_base +
-                    channel * destination_stride);
-                for (element = 0; element < elements; element++) {
-                    row[element] = fp32_to_fp16_rne(
-                        source[channel * elements + element]);
-                }
+                snprintf(error, sizeof(error), "scatter record %zu %s",
+                         record_index,
+                         record_error == NULL ? "is invalid" : record_error);
             }
         }
         if (!valid)
             return write_response_header(1, model_index, 0, error);
+
+        /* Phase 2: every cached source becomes CPU-coherent before the first
+         * destination byte is changed.  Failure preserves all destinations. */
+        if (cached) {
+            for (record_index = 0; record_index < record_count;
+                 record_index++) {
+                resident_scatter_f32_to_f16 *scatter =
+                    &records[record_index];
+                if (svp_acl_rt_mem_invalidate(
+                        (void *)scatter->source, scatter->source_capacity) !=
+                    SVP_ACL_SUCCESS) {
+                    snprintf(error, sizeof(error),
+                             "scatter record %zu could not invalidate source",
+                             record_index);
+                    return write_response_header(
+                        2, model_index, 0, error);
+                }
+            }
+        }
+
+        /* Phase 3 has no fallible runtime calls: all records are converted only
+         * after the entire request and cache-invalidate phase have succeeded. */
+        for (record_index = 0; record_index < record_count; record_index++) {
+            resident_scatter_f32_to_f16 *scatter = &records[record_index];
+            scatter_f32_to_f16_rows(
+                scatter->destination, scatter->source,
+                scatter->destination_base, scatter->destination_stride,
+                scatter->channels, scatter->elements);
+        }
+
+        /* Phase 4 publishes every modified row before ACK.  Once writes have
+         * happened, a flush failure leaves coherence uncertain.  Send the
+         * error frame, then terminate this executor session (return -2) so no
+         * caller can accidentally continue without reloading all handles. */
+        if (cached) {
+            for (record_index = 0; record_index < record_count;
+                 record_index++) {
+                resident_scatter_f32_to_f16 *scatter =
+                    &records[record_index];
+                size_t channel;
+                for (channel = 0; channel < scatter->channels; channel++) {
+                    if (svp_acl_rt_mem_flush(
+                            scatter->destination + scatter->destination_base +
+                                channel * scatter->destination_stride,
+                            (size_t)scatter->row_bytes) != SVP_ACL_SUCCESS) {
+                        snprintf(
+                            error, sizeof(error),
+                            "scatter record %zu channel %zu could not flush "
+                            "destination; executor session is poisoned",
+                            record_index, channel);
+                        if (write_response_header(
+                                2, model_index, 0, error) != 0) return -1;
+                        return -2;
+                    }
+                }
+            }
+        }
         return write_response_header(0, model_index, 0, NULL);
     }
     if (opcode == OP_WRITE_INPUT) {
@@ -1145,6 +1766,7 @@ int main(int argc, char **argv)
 {
     executor_options options;
     persistent_model models[MAX_MODELS];
+    resident_snapshot snapshots[MAX_SNAPSHOTS];
     size_t loaded_count = 0;
     svp_acl_error result;
     int acl_initialized = 0;
@@ -1153,6 +1775,7 @@ int main(int argc, char **argv)
     char ready_error[512] = {0};
     uintmax_t total_om_bytes = 0;
     memset(models, 0, sizeof(models));
+    memset(snapshots, 0, sizeof(snapshots));
     if (parse_args(argc, argv, &options) != 0) {
         usage(argv[0]);
         return 2;
@@ -1213,7 +1836,7 @@ int main(int argc, char **argv)
             "\n", options.model_count, options.cached, total_om_bytes);
     for (;;) {
         int serve_result = serve_request(models, options.model_count,
-                                         options.cached);
+                                         options.cached, snapshots);
         if (serve_result == 1) {
             exit_code = 0;
             break;
@@ -1221,6 +1844,13 @@ int main(int argc, char **argv)
         if (serve_result != 0) break;
     }
 cleanup:
+    {
+        size_t snapshot_index;
+        for (snapshot_index = 0; snapshot_index < MAX_SNAPSHOTS;
+             snapshot_index++) {
+            destroy_snapshot(&snapshots[snapshot_index]);
+        }
+    }
     while (loaded_count != 0) destroy_model(&models[--loaded_count]);
     if (device_set) svp_acl_rt_reset_device(options.device_id);
     if (acl_initialized) svp_acl_finalize();

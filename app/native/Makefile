@@ -4,7 +4,7 @@
 #
 # Board build from this directory:
 #   make \
-#     SDK_ROOT=/path/to/SS928/sdk/smp/a55_linux/mpp/out \
+#     SDK_ROOT=/path/to/Hi3403/sdk/smp/a55_linux/mpp/out \
 #     CC=aarch64-mix210-linux-gcc
 
 SDK_ROOT ?= /opt/ss928v100_gcc/smp/a55_linux/mpp/out
@@ -16,7 +16,7 @@ HOST_CC ?= cc
 EXECUTOR_SRC ?= pico_persistent_acl_executor.c
 EXECUTOR_BIN ?= ../bin/pico_persistent_acl_executor.aarch64
 CONTRACT_CHECK_BIN ?= pico_persistent_acl_executor_contract_check
-# These are the executor's direct runtime dependencies in the SS928 SDK.  The
+# These are the executor's direct runtime dependencies in the Hi3403 SDK.  The
 # SDK ships protobuf-c as libprotobuf-c.so.1 without an unversioned .so link;
 # naming the SONAME also avoids accidentally selecting the static archive.
 SVP_ACL_LIBS ?= -lsvp_acl -lsvp_aicpu -l:libprotobuf-c.so.1 -lsecurec

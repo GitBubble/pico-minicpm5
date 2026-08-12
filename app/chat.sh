@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
-# MiniCPM5-1B multi-context resident-K/V SS928 demo.
+# MiniCPM5-1B multi-context resident-K/V Hi3403 demo.
 set -eu
 
 APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -22,6 +22,19 @@ fi
 TOKENIZERS=${TOKENIZERS:-}
 MAX_NEW=${MAX_NEW:-}
 PROFILE=${PICO_PROFILE:-ctx1024}
+REUSE_SESSION_KV=${REUSE_SESSION_KV:-1}
+
+case "$REUSE_SESSION_KV" in
+  1|true|TRUE|on|ON)
+    set -- --reuse-session-kv "$@"
+    ;;
+  0|false|FALSE|off|OFF|"")
+    ;;
+  *)
+    echo "REUSE_SESSION_KV must be 0/1, false/true or off/on" >&2
+    exit 2
+    ;;
+esac
 
 # Chat remains the default when callers only pass display/runtime options.
 # An explicit prompt or mode is forwarded unchanged for compatibility.

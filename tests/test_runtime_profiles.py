@@ -37,6 +37,8 @@ def test_builtin_profile_matrix_and_limits(tmp_path: Path) -> None:
     assert loaded["ctx1024"].status == "qualified"
     assert loaded["ctx4096"].max_new_limit == 512
     assert loaded["ctx8192"].max_new_limit == 1024
+    assert loaded["ctx1024"].kv_output_slots == (0, 1)
+    assert loaded["ctx1024"].hidden_output_slot == 2
     assert loaded["ctx4096"].model_paths(tmp_path)["decode"] == (
         tmp_path / "models/ctx4096/decode.om")
 
@@ -86,4 +88,15 @@ def test_profile_rejects_boolean_numeric_gate(tmp_path: Path) -> None:
     malformed.write_text(json.dumps(source), encoding="utf-8")
 
     with pytest.raises(profiles.ProfileError, match="real number"):
+        profiles.load_runtime_profile(str(malformed), PROFILES)
+
+
+def test_profile_rejects_ambiguous_transformer_output_slots(tmp_path: Path) -> None:
+    profiles = _module()
+    source = json.loads((PROFILES / "ctx1024.json").read_text())
+    source["transformer_outputs"] = {"k": 0, "v": 0, "hidden": 2}
+    malformed = tmp_path / "duplicate-output-slot.json"
+    malformed.write_text(json.dumps(source), encoding="utf-8")
+
+    with pytest.raises(profiles.ProfileError, match="distinct and cover"):
         profiles.load_runtime_profile(str(malformed), PROFILES)

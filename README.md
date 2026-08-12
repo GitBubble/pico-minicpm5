@@ -4,7 +4,7 @@
 
 `pico-minicpm5` turns the pinned
 [`openbmb/MiniCPM5-1B`](https://huggingface.co/openbmb/MiniCPM5-1B)
-checkpoint into a reproducible SS928/PICO deployment:
+checkpoint into a reproducible Hi3403/PICO deployment:
 
 ```text
 Hugging Face checkpoint
@@ -19,7 +19,7 @@ one prefill ONNX + one decode ONNX with packed K/V (5 public inputs / 3 outputs)
 prefill.om + decode.om + head_flat.om
         │ manifest, checksums and numeric qualification
         ▼
-three-handle SS928 release bundle
+three-handle Hi3403 release bundle
 ```
 
 The production merge is **graph composition before compilation**. It is not
@@ -29,7 +29,7 @@ only as an experimental, fail-closed recovery path.
 
 ## Status
 
-The frozen `ctx1024` three-handle candidate was accepted on an SS928 board:
+The frozen `ctx1024` three-handle candidate was accepted on an Hi3403 board:
 
 - prefill minimum public-output cosine: `0.996646`;
 - decode minimum public-output cosine: `0.998023`;
@@ -37,13 +37,20 @@ The frozen `ctx1024` three-handle candidate was accepted on an SS928 board:
 - EOS and Chinese text paths passed;
 - optimized resident-K/V runtime: `9.42–9.48 token/s` at
   `105.5–106.1 ms/token`, approximately `1.91x` the accepted 49-handle
-  baseline.
+  baseline;
+- prompt-only head suppression passed a token-exact board A/B and reduced a
+  rebased 810-token cold request from `86.70 s` to `69.45 s` (`19.89%`), while
+  a 643-token resident-prefix hit reduced it further to `14.61 s`.
+- The fail-closed native-prefill planner now implements the future
+  `S128 -> S32 -> S16 -> strict S1 tail` policy and exposes its decision in
+  request reports. Only S1 is enabled in the qualified release; see
+  [the native prefill contract](docs/NATIVE_PREFILL_SCHEDULER.md).
 
-These are SS928 measurements. They are not a claim that every Hi3403 product
+These are Hi3403 measurements. They are not a claim that every Hi3403 product
 configuration has been qualified. The upstream checkpoint advertises a much
 longer context; this release contract is intentionally fixed at `1024`.
 
-## Deploy the prebuilt SS928 demo
+## Deploy the prebuilt Hi3403 demo
 
 Release [`v0.1.0`](https://github.com/GitBubble/pico-minicpm5/releases/tag/v0.1.0)
 contains the accepted three-handle deployment: `prefill.om`, `decode.om`,
@@ -159,7 +166,7 @@ pico-minicpm5 build \
   --atc /path/to/atc \
   --custom-ops-lib /path/to/libsvp_custom.so
 
-# 6. Run all three OMs with libinstsim or the SS928 runtime. Immediately after
+# 6. Run all three OMs with libinstsim or the Hi3403 runtime. Immediately after
 # each completed run, capture the exact files from that run before scoring them.
 pico-minicpm5 capture \
   --runner libinstsim --role prefill --position 0 --context 1024 \
@@ -283,7 +290,9 @@ See [docs/PIPELINE.md](docs/PIPELINE.md),
 [docs/OM_COMPOSITION.md](docs/OM_COMPOSITION.md) and
 [docs/RELEASE.md](docs/RELEASE.md) for the exact build/release contracts. The
 [Agent routing and runtime-context profile design](docs/AGENT_ROUTING_AND_CONTEXT_PROFILES.md)
-defines hybrid routing and the ctx128/1024/4096/8192 capability matrix.
+defines hybrid routing and the ctx128/1024/4096/8192 capability matrix; the
+[native prefill scheduler](docs/NATIVE_PREFILL_SCHEDULER.md) defines the
+`S128 -> S32 -> S16 -> S1` TTFT path and its activation gates.
 
 ## Development
 
@@ -294,5 +303,5 @@ pico-minicpm5 release source --out artifacts
 ```
 
 Public CI uses a tiny synthetic Llama fixture and a fake compiler. Checkpoint
-download, ATC compilation, libinstsim and SS928 execution are opt-in local or
+download, ATC compilation, libinstsim and Hi3403 execution are opt-in local or
 self-hosted jobs and must never upload private SDK material to a public cache.

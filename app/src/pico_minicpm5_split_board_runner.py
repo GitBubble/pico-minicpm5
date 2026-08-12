@@ -8,7 +8,7 @@ with a byte-exact DDR hand-off.  The default compatibility path uses
 ``svp_acl_board_probe`` per segment.  ``--persistent-executor`` instead keeps
 one position-selected model table resident in a native ACL process while this
 module retains the qualified 97-stage/token schedule.  Position zero and
-steady decode use separate <=64-handle processes because real SS928 admission
+steady decode use separate <=64-handle processes because real Hi3403 admission
 rejects the 65th simultaneous model.  The module is deliberately Python-
 standard-library-only so it can run in the board image.
 
@@ -71,8 +71,17 @@ PERSISTENT_OP_ARGMAX = 5
 # into a resident model input.  The fixed record is generic layout metadata;
 # tensor roles and MiniCPM geometry remain in the caller.
 PERSISTENT_OP_SCATTER_F32_TO_F16 = 6
+# Executor-owned resident-input snapshots. SAVE copies explicitly named input
+# ranges into bounded host memory; RESTORE copies them back without crossing
+# the protocol pipe. These opcodes are generic and contain no model semantics.
+PERSISTENT_OP_SNAPSHOT_INPUTS = 7
+PERSISTENT_OP_RESTORE_INPUTS = 8
+# Generic resident input-to-input copy.  The protocol is intentionally scoped
+# to one live executor/model table: it has no handle-generation field and does
+# not claim that indices remain valid after a process or phase replacement.
+PERSISTENT_OP_COPY_INPUTS = 9
 PERSISTENT_MAX_MODELS = 128
-# The binary protocol can describe 128 models, but a real SS928 admission
+# The binary protocol can describe 128 models, but a real Hi3403 admission
 # rejected the 65th resident model with runtime error 500004.  Runtime model
 # tables therefore fail closed at the observed 64-handle device limit.  The
 # larger protocol limit remains useful for host-only protocol qualification.
@@ -81,6 +90,7 @@ PERSISTENT_PHASE_STARTUP = "startup"
 PERSISTENT_PHASE_STEADY = "steady"
 PERSISTENT_PHASES = (PERSISTENT_PHASE_STARTUP, PERSISTENT_PHASE_STEADY)
 PERSISTENT_MAX_MODEL_IO = 64
+PERSISTENT_MAX_INPUT_COPY_RECORDS = 256
 PERSISTENT_MAX_ERROR_BYTES = 4096
 PERSISTENT_MAX_TENSOR_BYTES = 1 << 34
 _PERSISTENT_READY = struct.Struct("<IHHII")
@@ -98,6 +108,8 @@ _PERSISTENT_U64 = struct.Struct("<Q")
 _PERSISTENT_WRITE = struct.Struct("<IIQQ")
 _PERSISTENT_CHAIN = struct.Struct("<IIQ")
 _PERSISTENT_SCATTER_F32_TO_F16 = struct.Struct("<IIIIQQIIQ")
+_PERSISTENT_SNAPSHOT_RANGE = struct.Struct("<IIQQ")
+_PERSISTENT_INPUT_COPY = struct.Struct("<IIQIIQQI")
 PERSISTENT_WRITE_FLAG_PAYLOAD = 0
 PERSISTENT_WRITE_FLAG_CHAIN = 1
 
@@ -108,6 +120,24 @@ class ConfigError(ValueError):
 
 class ExecutionError(RuntimeError):
     """One native segment or a byte-layout contract failed."""
+
+
+@dataclass(frozen=True)
+class ResidentInputCopy:
+    """One byte-exact input-to-input copy in the current resident table.
+
+    Model identifiers are executor-local indices.  Callers must rebuild these
+    records after replacing an executor process or changing its phase; protocol
+    v1 deliberately has no model-table generation guard.
+    """
+
+    destination_model: int
+    destination_input: int
+    destination_offset: int
+    source_model: int
+    source_input: int
+    source_offset: int
+    length: int
 
 
 @dataclass(frozen=True)
@@ -701,7 +731,7 @@ class ProbeExecutor:
 def _persistent_model_paths(config: RunnerConfig) -> tuple[Path, ...]:
     """Return the stable union of every startup and steady model path.
 
-    This is a provenance/disk table, not a board-resident table.  The SS928
+    This is a provenance/disk table, not a board-resident table.  The Hi3403
     runtime limit applies independently to each table returned by
     :func:`_persistent_phase_model_paths`.
     """
@@ -776,7 +806,7 @@ def _persistent_phase_model_paths(
         append(config.final_head.path)
     if not 0 < len(ordered) <= PERSISTENT_RUNTIME_MODEL_LIMIT:
         raise ConfigError(
-            f"persistent {phase} phase exceeds observed SS928 runtime limit "
+            f"persistent {phase} phase exceeds observed Hi3403 runtime limit "
             f"{PERSISTENT_RUNTIME_MODEL_LIMIT}: {len(ordered)} unique handles")
     return tuple(ordered)
 
@@ -859,7 +889,7 @@ class PersistentAclExecutor:
         }
         if not 0 < len(self.model_paths) <= PERSISTENT_RUNTIME_MODEL_LIMIT:
             raise ConfigError(
-                "persistent ACL executor model table exceeds observed SS928 "
+                "persistent ACL executor model table exceeds observed Hi3403 "
                 f"runtime limit {PERSISTENT_RUNTIME_MODEL_LIMIT}: "
                 f"{len(self.model_paths)}")
         command = [str(self.executable), "--device", str(device)]
@@ -988,6 +1018,88 @@ class PersistentAclExecutor:
                 f"persistent ACL model[{model_index}] response sizes "
                 f"{sizes} != {expected}")
         return tuple(read(size) for size in sizes)
+
+    def copy_resident_inputs(
+        self, records: Sequence[ResidentInputCopy], *,
+        tag: str = "resident-input-copy",
+    ) -> None:
+        """Copy validated byte ranges between inputs in this live process.
+
+        All records are validated and serialized before the request header is
+        written, matching the native executor's no-destination-write behavior
+        for a bad record.  The operation carries no model-table generation;
+        executor-local indices must not be retained across a process restart or
+        :class:`PhasedPersistentAclExecutor` phase transition.
+        """
+        if self._closed:
+            raise ExecutionError("persistent ACL executor is closed")
+        if self.process is None:
+            self._start_process()
+        fixed = tuple(records)
+        if not 0 < len(fixed) <= PERSISTENT_MAX_INPUT_COPY_RECORDS:
+            raise ExecutionError(
+                f"{tag} record count must be in "
+                f"[1, {PERSISTENT_MAX_INPUT_COPY_RECORDS}]")
+        encoded: list[bytes] = []
+        for index, record in enumerate(fixed):
+            if not isinstance(record, ResidentInputCopy):
+                raise ExecutionError(
+                    f"{tag} record[{index}] is not a ResidentInputCopy")
+            values = (
+                record.destination_model, record.destination_input,
+                record.destination_offset, record.source_model,
+                record.source_input, record.source_offset, record.length)
+            if any(type(value) is not int for value in values):
+                raise ExecutionError(
+                    f"{tag} record[{index}] fields must be integers")
+            if not 0 <= record.destination_model < len(self.descriptors) \
+                    or not 0 <= record.source_model < len(self.descriptors):
+                raise ExecutionError(
+                    f"{tag} record[{index}] model index is out of range")
+            destination_inputs = self.descriptors[
+                record.destination_model][0]
+            source_inputs = self.descriptors[record.source_model][0]
+            if not 0 <= record.destination_input < len(destination_inputs) \
+                    or not 0 <= record.source_input < len(source_inputs):
+                raise ExecutionError(
+                    f"{tag} record[{index}] input index is out of range")
+            if record.destination_offset < 0 or record.source_offset < 0 \
+                    or not 0 < record.length <= PERSISTENT_MAX_TENSOR_BYTES:
+                raise ExecutionError(
+                    f"{tag} record[{index}] offset or length is invalid")
+            destination_capacity = destination_inputs[
+                record.destination_input]
+            source_capacity = source_inputs[record.source_input]
+            if record.destination_offset > destination_capacity \
+                    or record.length > (destination_capacity -
+                                          record.destination_offset) \
+                    or record.source_offset > source_capacity \
+                    or record.length > (source_capacity -
+                                          record.source_offset):
+                raise ExecutionError(
+                    f"{tag} record[{index}] exceeds source or destination "
+                    "input")
+            encoded.append(_PERSISTENT_INPUT_COPY.pack(
+                record.destination_model, record.destination_input,
+                record.destination_offset, record.source_model,
+                record.source_input, record.source_offset, record.length, 0))
+        frame = _PERSISTENT_REQUEST.pack(
+            PERSISTENT_REQUEST_MAGIC, PERSISTENT_PROTOCOL_VERSION,
+            PERSISTENT_OP_COPY_INPUTS, 0, len(encoded), 0, 0) + b"".join(encoded)
+        try:
+            _write_all(self._stdin, frame)
+            self._stdin.flush()
+            outputs = self._read_response(0, ())
+            if outputs:
+                raise ExecutionError(
+                    f"{tag} returned unexpected tensor outputs")
+        except ExecutionError:
+            self._dispose_process()
+            raise
+        except (BrokenPipeError, OSError) as exc:
+            self._dispose_process()
+            raise ExecutionError(
+                f"{tag} persistent ACL transport failed: {exc}") from exc
 
     def execute(
         self, model: Path, inputs: Sequence[bytes],

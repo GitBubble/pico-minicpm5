@@ -1,11 +1,12 @@
 #!/bin/sh
 # SPDX-License-Identifier: Apache-2.0
-# MiniCPM5-1B configurable native tool-calling agent for SS928.
+# MiniCPM5-1B configurable native tool-calling agent for Hi3403.
 set -eu
 
 APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 MAX_NEW=${MAX_NEW:-}
 THINKING=${THINKING:-0}
+FIXED_PREFIX_SNAPSHOTS=${FIXED_PREFIX_SNAPSHOTS:-1}
 
 case "$THINKING" in
   1|true|TRUE|on|ON)
@@ -15,6 +16,18 @@ case "$THINKING" in
     ;;
   *)
     echo "THINKING must be 0/1, false/true or off/on" >&2
+    exit 2
+    ;;
+esac
+
+case "$FIXED_PREFIX_SNAPSHOTS" in
+  1|true|TRUE|on|ON)
+    set -- --fixed-prefix-snapshots "$@"
+    ;;
+  0|false|FALSE|off|OFF|"")
+    ;;
+  *)
+    echo "FIXED_PREFIX_SNAPSHOTS must be 0/1, false/true or off/on" >&2
     exit 2
     ;;
 esac

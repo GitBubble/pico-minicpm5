@@ -4,7 +4,7 @@
 
 `pico-minicpm5` 将固定版本的
 [`openbmb/MiniCPM5-1B`](https://huggingface.co/openbmb/MiniCPM5-1B)
-转换为可复现的 SS928/PICO 三句柄部署：
+转换为可复现的 Hi3403/PICO 三句柄部署：
 
 ```text
 Hugging Face checkpoint
@@ -19,7 +19,7 @@ Hugging Face checkpoint
 
 ## 当前状态
 
-冻结的 `ctx1024` 候选已在 SS928 上完成验收：
+冻结的 `ctx1024` 候选已在 Hi3403 上完成验收：
 
 - prefill 公开输出最低 cosine：`0.996646`；
 - decode 公开输出最低 cosine：`0.998023`；
@@ -27,8 +27,15 @@ Hugging Face checkpoint
 - EOS 与中文生成路径通过；
 - 优化后 resident-K/V runtime 达到 `9.42–9.48 token/s`，
   即 `105.5–106.1 ms/token`，约为已验收 49 句柄基线的 `1.91x`。
+- prompt-only head 抑制通过 token-exact 板端 A/B：rebase 后 810-token 首次请求
+  由 `86.70 s` 降至 `69.45 s`（降低 `19.89%`），命中 643-token resident 前缀后
+  进一步降至 `14.61 s`。
+- fail-closed native-prefill 调度器已实现未来的
+  `S128 -> S32 -> S16 -> strict S1 tail` 策略，并把决策写入请求报告。当前
+  已验收 Release 仍只启用 S1，详见
+  [native prefill 合同](docs/NATIVE_PREFILL_SCHEDULER.zh-CN.md)。
 
-这些数字只对应已记录的 SS928 配置和三个冻结 OM 哈希，不代表所有 Hi3403 产品
+这些数字只对应已记录的 Hi3403 配置和三个冻结 OM 哈希，不代表所有 Hi3403 产品
 配置。本 Release 的上下文合同固定为 1024。
 
 ## 直接在板端运行
@@ -113,12 +120,13 @@ data、OM、token embedding、ATC/DDK/libinstsim、SDK 动态库和私有板端�
 更多中文文档：
 
 - [Agent 路由与运行时 Context Profile 设计](docs/AGENT_ROUTING_AND_CONTEXT_PROFILES.zh-CN.md)
+- [Native 多 Token Prefill 调度合同](docs/NATIVE_PREFILL_SCHEDULER.zh-CN.md)
 - [端到端流水线](docs/PIPELINE.zh-CN.md)
 - [OM 图级组合合同](docs/OM_COMPOSITION.zh-CN.md)
 - [验证阶梯](docs/VALIDATION.zh-CN.md)
 - [SDK 环境](docs/SDK_SETUP.zh-CN.md)
 - [发布策略](docs/RELEASE.zh-CN.md)
-- [SS928 验收](docs/SS928_ACCEPTANCE.zh-CN.md)
+- [Hi3403 验收](docs/Hi3403_ACCEPTANCE.zh-CN.md)
 
 开发检查：
 

@@ -148,7 +148,7 @@ def _qualified(qualification: dict) -> bool:
             or qualification.get("model")
             != {"repository": HF_REPO_ID, "revision": HF_REVISION}
             or qualification.get("target")
-            != {"soc": "SS928", "npu_arch": "V101", "context": 1024}
+            != {"soc": "Hi3403", "npu_arch": "V101", "context": 1024}
         ):
             return False
         expected_compiler = {"backend": "atc", "build_manifest_sha256": build_digest}
@@ -444,7 +444,7 @@ def _assemble_bundle_into(
         "schema": "pico.minicpm5.local-model-release.v1",
         "source": {"package": "pico-minicpm5", "version": __version__},
         "model": {"repository": HF_REPO_ID, "revision": HF_REVISION},
-        "target": {"soc": "SS928", "npu_arch": "V101", "context": 1024},
+        "target": {"soc": "Hi3403", "npu_arch": "V101", "context": 1024},
         "abi": {
             "handles": 3,
             "transformer_public_inputs": 5,
@@ -517,7 +517,7 @@ def verify_bundle(root: Path) -> dict:
     if manifest.get("model") != {"repository": HF_REPO_ID, "revision": HF_REVISION}:
         raise ValueError("release model provenance drift")
     target = manifest.get("target", {})
-    if target != {"soc": "SS928", "npu_arch": "V101", "context": 1024}:
+    if target != {"soc": "Hi3403", "npu_arch": "V101", "context": 1024}:
         raise ValueError("release target contract drift")
     abi = manifest.get("abi", {})
     required_abi = {

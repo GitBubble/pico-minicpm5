@@ -8,7 +8,7 @@
 3. Incremental depth: N=1 identity, N=2 output differs from layer zero and
    agrees with the two-layer reference, then 4/8/12/24.
 4. Local execution: raw public K, V and hidden tensors, strict cosine `>0.98`.
-   Immediately after each libinstsim or SS928 run, create a
+   Immediately after each libinstsim or Hi3403 run, create a
    `pico.minicpm5.runtime-capture.v1` manifest bound to the executed
    transformer OM, ATC build manifest, position, ctx1024 and raw files.
 5. Board: load exactly three handles, compare board raw output to the same OM
@@ -47,4 +47,4 @@ Runtime capture is deliberately modest in scope: it is an auditable local
 record of hashes supplied after an execution, not a cryptographic proof of
 execution, signed board report or remote attestation. The `--runner` value is
 an operator assertion. Create the manifest immediately after the corresponding
-libinstsim/SS928 run and preserve it with the raw files.
+libinstsim/Hi3403 run and preserve it with the raw files.

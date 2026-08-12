@@ -112,7 +112,7 @@ its tiny PICO-marked files are test artifacts and never deployable models.
 
 ## 7. Qualify and release
 
-Run the transformer under `libinstsim` or on SS928 and save its three raw
+Run the transformer under `libinstsim` or on Hi3403 and save its three raw
 public outputs. Immediately after that same execution, create its capture
 manifest and then score the captured files. First capture and score the
 position-zero prefill run:

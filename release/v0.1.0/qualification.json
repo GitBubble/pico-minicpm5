@@ -1,7 +1,7 @@
 {
   "schema": "pico.minicpm5.merged3handle.qualification.v1",
   "date": "2026-08-10",
-  "board": "SS928 (board address intentionally omitted)",
+  "board": "Hi3403 (board address intentionally omitted)",
   "cosine_threshold_exclusive": 0.98,
   "artifacts": {
     "decode": {

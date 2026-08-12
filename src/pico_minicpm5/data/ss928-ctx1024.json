@@ -1,6 +1,6 @@
 {
   "schema": "pico.minicpm5.target.v1",
-  "target": "SS928",
+  "target": "Hi3403",
   "npu_arch": "V101",
   "context": 1024,
   "past": 1023,

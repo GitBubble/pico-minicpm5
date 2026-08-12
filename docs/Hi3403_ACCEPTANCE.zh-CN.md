@@ -1,6 +1,6 @@
-# 冻结的 SS928 ctx1024 验收
+# 冻结的 Hi3403 ctx1024 验收
 
-[English](SS928_ACCEPTANCE.md)
+[English](Hi3403_ACCEPTANCE.md)
 
 2026-08-09 验收的三句柄候选由 `release/v0.1.0/release-manifest.json` 唯一标识。
 

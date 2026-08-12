@@ -238,7 +238,7 @@ def _complete_new_qualification(*, declared: float, minimum: float) -> dict:
     return {
         "schema": "pico.minicpm5.qualification.v1",
         "model": {"repository": HF_REPO_ID, "revision": HF_REVISION},
-        "target": {"soc": "SS928", "npu_arch": "V101", "context": 1024},
+        "target": {"soc": "Hi3403", "npu_arch": "V101", "context": 1024},
         "threshold_exclusive": declared,
         "families": families,
         "head": {

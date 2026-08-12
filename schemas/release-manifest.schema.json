@@ -22,7 +22,7 @@
       "type": "object",
       "required": ["soc", "npu_arch", "context"],
       "properties": {
-        "soc": {"const": "SS928"},
+        "soc": {"const": "Hi3403"},
         "npu_arch": {"const": "V101"},
         "context": {"const": 1024}
       },

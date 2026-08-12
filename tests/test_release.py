@@ -95,7 +95,7 @@ def _qualification(artifacts: dict, *, declared: float = 0.98, minimum: float = 
     return {
         "schema": "pico.minicpm5.qualification.v1",
         "model": {"repository": HF_REPO_ID, "revision": HF_REVISION},
-        "target": {"soc": "SS928", "npu_arch": "V101", "context": 1024},
+        "target": {"soc": "Hi3403", "npu_arch": "V101", "context": 1024},
         "threshold_exclusive": declared,
         "families": families,
         "head": {
@@ -225,7 +225,7 @@ def _complete_release(
         "schema": "pico.minicpm5.local-model-release.v1",
         "source": {"package": "pico-minicpm5", "version": __version__},
         "model": {"repository": HF_REPO_ID, "revision": HF_REVISION},
-        "target": {"soc": "SS928", "npu_arch": "V101", "context": 1024},
+        "target": {"soc": "Hi3403", "npu_arch": "V101", "context": 1024},
         "abi": {
             "handles": 3,
             "transformer_public_inputs": 5,

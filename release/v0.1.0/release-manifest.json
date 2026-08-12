@@ -8,7 +8,7 @@
     "relationship": "generated artifacts are derived from separately downloaded model weights"
   },
   "target": {
-    "soc": "SS928",
+    "soc": "Hi3403",
     "npu_arch": "V101",
     "context": 1024
   },

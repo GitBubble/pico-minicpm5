@@ -11,7 +11,7 @@ The production compiler invocation needs:
   calibration, online OM output and custom-op registration;
 - the matching runtime/linker libraries in `LD_LIBRARY_PATH`;
 - a custom-op library registering `ExtendRMSNorm`;
-- legal access to an SS928 runtime for final qualification.
+- legal access to an Hi3403 runtime for final qualification.
 
 Run `pico-minicpm5 doctor` to inspect visible dependencies. Use absolute CLI
 paths or an environment prepared by the installed vendor SDK. Never upload SDK

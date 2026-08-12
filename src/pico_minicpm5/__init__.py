@@ -1,4 +1,4 @@
-"""MiniCPM5-1B compiler enablement for SS928/PICO."""
+"""MiniCPM5-1B compiler enablement for Hi3403/PICO."""
 
 from .contract import OFFICIAL_CONTRACT, MiniCPM5Contract
 

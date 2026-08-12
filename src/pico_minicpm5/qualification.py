@@ -362,7 +362,7 @@ def build_qualification(
     report: dict[str, Any] = {
         "schema": "pico.minicpm5.qualification.v1",
         "model": {"repository": HF_REPO_ID, "revision": HF_REVISION},
-        "target": {"soc": "SS928", "npu_arch": "V101", "context": CONTEXT},
+        "target": {"soc": "Hi3403", "npu_arch": "V101", "context": CONTEXT},
         "threshold_exclusive": threshold_exclusive,
         "families": families,
         "head": head,

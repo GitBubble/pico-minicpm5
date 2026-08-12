@@ -5,13 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pico-minicpm5"
 version = "0.1.0"
-description = "Reproducible MiniCPM5-1B ONNX and SS928/PICO three-handle build pipeline"
+description = "Reproducible MiniCPM5-1B ONNX and Hi3403/PICO three-handle build pipeline"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{name = "PicoNPU Enablement Contributors"}]
-keywords = ["MiniCPM5", "ONNX", "SS928", "PICO", "edge-ai"]
+keywords = ["MiniCPM5", "ONNX", "Hi3403", "PICO", "edge-ai"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Programming Language :: Python :: 3",

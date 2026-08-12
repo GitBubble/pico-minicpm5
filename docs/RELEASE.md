@@ -32,7 +32,7 @@ Build the qualified AArch64 executor, then assemble the single runtime asset:
 
 ```bash
 make -C app/native \
-  SDK_ROOT=/path/to/SS928/sdk/smp/a55_linux/mpp/out \
+  SDK_ROOT=/path/to/Hi3403/sdk/smp/a55_linux/mpp/out \
   CC=aarch64-mix210-linux-gcc
 pico-minicpm5 release runtime \
   --executor app/bin/pico_persistent_acl_executor.aarch64 \
@@ -59,7 +59,7 @@ qualification is mandatory. That qualification contains independently scored
 prefill, decode and vocabulary-head evidence, all bound to the exact OM hashes
 and one ATC build-manifest hash. Each score must also carry a matching
 `pico.minicpm5.runtime-capture.v1` lineage manifest generated immediately after
-its libinstsim or SS928 run. Capture records are local hash-based audit
+its libinstsim or Hi3403 run. Capture records are local hash-based audit
 evidence, not cryptographic execution proofs or remote attestation. The full
 build/capture/score/qualification contract is fixed at ctx1024. The bundle
 contains three OM files, the derived FP16 embedding, tokenizer and manifests.

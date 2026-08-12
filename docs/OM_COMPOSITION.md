@@ -17,7 +17,7 @@ and the physical hidden bridge.
 6. Publish only the final hidden and the two packed current-row tensors.
 
 For 24 layers this is a stable five-input/three-output public ABI. ATC's
-observed SS928 descriptor has seven runtime inputs because it synthesizes two
+observed Hi3403 descriptor has seven runtime inputs because it synthesizes two
 auxiliary inputs; they are runtime implementation details, not graph inputs.
 
 ## External data

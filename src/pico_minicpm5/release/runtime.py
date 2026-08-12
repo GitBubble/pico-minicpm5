@@ -1,4 +1,4 @@
-"""Deterministic SS928 board-application archive."""
+"""Deterministic Hi3403 board-application archive."""
 from __future__ import annotations
 
 import gzip

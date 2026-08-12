@@ -14,7 +14,7 @@ TaskInfo 和物理 hidden bridge。
 5. current K/V 按 layer-major、KV-head-major 顺序 Concat。
 6. 只发布最终 hidden 和两个打包 current-row tensor。
 
-24 层公共 ABI 固定为 5 输入/3 输出。ATC 的 SS928 descriptor 会额外合成两个
+24 层公共 ABI 固定为 5 输入/3 输出。ATC 的 Hi3403 descriptor 会额外合成两个
 runtime input，它们不是图输入。
 
 ## External data 与量化域

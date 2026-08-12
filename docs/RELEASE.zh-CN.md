@@ -23,7 +23,7 @@ AArch64 executor 生成唯一 runtime asset：
 
 ```bash
 make -C app/native \
-  SDK_ROOT=/path/to/SS928/sdk/smp/a55_linux/mpp/out \
+  SDK_ROOT=/path/to/Hi3403/sdk/smp/a55_linux/mpp/out \
   CC=aarch64-mix210-linux-gcc
 pico-minicpm5 release runtime \
   --executor app/bin/pico_persistent_acl_executor.aarch64 \

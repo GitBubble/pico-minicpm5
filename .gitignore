@@ -14,3 +14,5 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+.DS_Store
+app/native/pico_persistent_acl_executor_contract_check

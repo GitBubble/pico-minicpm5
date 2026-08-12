@@ -146,6 +146,56 @@ def test_phase_sums_and_mode_table_are_internally_consistent() -> None:
     assert ab["context"] == 8192
 
 
+def test_ttft_model_reproduces_every_measured_point() -> None:
+    ttft = _board()["ttft"]
+    validations = ttft["model"]["validated_against_measurement"]
+    assert validations
+    for case in validations:
+        model, measured = case["model_ms"], case["measured_ms"]
+        derived = 100.0 * (model - measured) / measured
+        assert abs(derived - case["error_percent"]) < 0.01, case["case"]
+        # A model that drifts more than 1% from measurement is not a model.
+        assert abs(derived) < 1.0, case["case"]
+
+
+def test_ttft_measurements_are_monotonic_and_evidence_bound() -> None:
+    ttft = _board()["ttft"]
+    profiles = {entry["profile"]: entry for entry in ttft["measured"]}
+    assert {"ctx1024", "ctx4096", "ctx8192"} <= set(profiles)
+    for name, entry in profiles.items():
+        assert entry["evidence"], name
+        for record in entry["evidence"]:
+            assert len(record["sha256"]) == 64, name
+        # Within one mode, a longer prompt cannot produce a smaller TTFT.
+        by_mode: dict[str, list[tuple[int, float]]] = {}
+        for point in entry["points"]:
+            by_mode.setdefault(point.get("mode", ""), []).append(
+                (point["prompt_tokens"], point["ttft_ms"]))
+        for mode, points in by_mode.items():
+            ordered = sorted(points)
+            assert [value for _, value in ordered] == \
+                sorted(value for _, value in ordered), (name, mode)
+
+
+def test_ttft_never_claims_unmeasured_long_prompts() -> None:
+    ttft = _board()["ttft"]
+    published = {"ctx1024", "ctx4096", "ctx8192"}
+    for entry in ttft["measured"]:
+        if entry["profile"] not in published:
+            continue
+        longest = max(point["prompt_tokens"] for point in entry["points"])
+        assert longest <= 12, entry["profile"]
+    assert any("long-prompt" in item.lower()
+               for item in ttft["not_measured"])
+    # The prose-only figures must stay quarantined, never promoted into the
+    # measured table.
+    unbound = ttft["unbound_prose_claims"]
+    assert unbound["claims"] and unbound["resolution"]
+    measured_blob = json.dumps(ttft["measured"])
+    for figure in ("86.70", "69.45", "14.61", "810", "643"):
+        assert figure not in measured_blob, figure
+
+
 def test_mixed_contract_shows_one_shared_prefill_handle_cost() -> None:
     ctx4096 = _entry("ctx4096")["position_zero_ms"]
     ctx8192 = _entry("ctx8192")["position_zero_ms"]

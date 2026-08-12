@@ -79,6 +79,60 @@ isolates that — uncached transformer, cached argmax — and banks the gain. Th
 zero-once executor then takes the transformer down another `31 ms`. Promptskip
 is deliberately flat in steady state; its gain is at prompt positions only.
 
+## Time to first token
+
+TTFT is the wall time from request start until the first generated token: every
+prompt-ingestion step summed. Position 0 runs on the prefill handle, positions
+`1..N-1` run on the decode handle **one token at a time**, and the head plus
+argmax run once at the last prompt position. Model load is excluded.
+
+So all three OMs contribute, but the counts differ: prefill and head execute
+once each, the decode handle executes `N-1` times. Past a handful of prompt
+tokens TTFT is almost entirely decode-handle time — which is why the wide-block
+planner (S16/S32/S128) targets the decode side rather than a per-context prefill
+binary.
+
+```
+ttft ≈ position_zero_total + (N − 1) × decode_step_total
+```
+
+This model reproduces every measured point to within **0.12%**:
+
+| Case | model | measured | error |
+|---|---:|---:|---:|
+| ctx128 bucket, 121 tokens | 11509.6 ms | 11495.3 ms | +0.12% |
+| ctx4096, 12 tokens | 1795.8 ms | 1796.2 ms | −0.02% |
+| ctx8192 legacy, 12 tokens | 2511.7 ms | 2511.3 ms | +0.02% |
+| ctx8192 zero-once, 12 tokens | 1931.3 ms | 1931.9 ms | −0.03% |
+
+### Measured TTFT
+
+| Profile | 5 tok | 6 tok | 7 tok | 12 tok | 121 tok |
+|---|---:|---:|---:|---:|---:|
+| ctx1024 (2026-08-09 runtime) | 831 ms | 965 ms | 1064 ms | 1639 ms | — |
+| ctx4096 | 723 ms | 881 ms | 1044 ms | 1796 ms | — |
+| ctx8192 (legacy cached) | 984 ms | 1206 ms | 1425 ms | 2511 ms | — |
+| ctx8192 (zero-once) | — | 946 ms | 1111 ms | 1932 ms | — |
+| ctx128 bucket | 491 ms | 585 ms | — | — | **11495 ms** |
+
+The ctx1024 row predates the resident-K/V and head-skip refresh (its decode step
+was 116–123 ms against today's 105.66 ms), so those are upper bounds for the
+shipped runtime. The 121-token ctx128-bucket run is the **only long-prompt TTFT
+measured anywhere in this project**, at a mean `95.00 ms` per prompt position.
+
+### What is not measured
+
+No published profile has a long-prompt TTFT: the largest measured prompt on
+ctx1024, ctx4096 or ctx8192 is **12 tokens**. There is also no on-disk run with
+a resident-prefix hit, a fixed-prefix snapshot, or wide prefill blocks.
+
+Two figures quoted in the README, CHANGELOG and release notes — the 810-token
+cold request falling `86.70 s → 69.45 s`, and the 643-token prefix hit reaching
+`14.61 s` — have **no retrievable per-step record**. They were produced live on
+the board and only summarized into prose. They are carried in `perf-board.json`
+under `ttft.unbound_prose_claims` for provenance; no gate depends on them, and
+the fix is to re-run both with the report written to disk.
+
 ## Gate binding
 
 A throughput number is publishable only next to the numeric gate the same

@@ -251,6 +251,107 @@
       }
     ]
   },
+  "ttft": {
+    "definition": "time to first token: wall time from request start until the first generated token, i.e. every prompt-ingestion step summed. Position 0 runs on the prefill handle, positions 1..N-1 run on the decode handle one token at a time, and the head plus argmax run once at the last prompt position. Model load time is excluded; it is reported separately as a cold-start cost.",
+    "why_decode_dominates": "the prefill handle and the vocabulary head each execute exactly once per request, while the decode handle executes N-1 times for an N-token prompt. Beyond a handful of prompt tokens, TTFT is almost entirely decode-handle time, which is why the wide-block prefill planner (S16/S32/S128) targets the decode side rather than a per-context prefill binary.",
+    "model": {
+      "formula": "ttft_ms ~= position_zero_total_ms + (prompt_tokens - 1) * decode_step_total_ms",
+      "validated_against_measurement": [
+        {"case": "ctx128 bucket, 121 tokens", "model_ms": 11509.6, "measured_ms": 11495.294, "error_percent": 0.12},
+        {"case": "ctx4096, 12 tokens", "model_ms": 1795.8, "measured_ms": 1796.246, "error_percent": -0.02},
+        {"case": "ctx8192 legacy, 12 tokens", "model_ms": 2511.7, "measured_ms": 2511.252, "error_percent": 0.02},
+        {"case": "ctx8192 zero-once, 12 tokens", "model_ms": 1931.3, "measured_ms": 1931.855, "error_percent": -0.03}
+      ],
+      "status": "the formula reproduces every measured point to within 0.12%, but it is a model; a projected long-prompt TTFT is not a measurement and is never reported as one below"
+    },
+    "measured": [
+      {
+        "profile": "ctx1024",
+        "runtime": "2026-08-09 three-handle acceptance runtime, before the resident-K/V and head-skip refresh; its decode step was 116-123 ms rather than today's 105.66 ms, so these are upper bounds for the shipped runtime",
+        "points": [
+          {"prompt_tokens": 5, "ttft_ms": 831.445, "prompt": "1+1 equals"},
+          {"prompt_tokens": 6, "ttft_ms": 965.434, "prompt": "The capital of France is"},
+          {"prompt_tokens": 7, "ttft_ms": 1064.241, "prompt": "def add(a, b):"},
+          {"prompt_tokens": 9, "ttft_ms": 1312.655, "prompt": "Chinese prompt"},
+          {"prompt_tokens": 12, "ttft_ms": 1639.046, "prompt": "1, 2, 3, 4,"}
+        ],
+        "evidence": [
+          {"path": "release_3handle/reports/e2e_oracle3.json", "sha256": "eaa485388013efad52485bcd379e3eac133022cc9d5a03a04ce29dd008abd639"},
+          {"path": "release_3handle/reports/e2e_chat2.json", "sha256": "b7dcfdd7783080c9fb6618ee40f3e21e18a27786184820bb63246157c2f258b5"}
+        ]
+      },
+      {
+        "profile": "ctx4096",
+        "runtime": "mixed prefill window, resident packed K/V, no head skip",
+        "points": [
+          {"prompt_tokens": 5, "ttft_ms": 722.768, "prompt": "1+1 equals"},
+          {"prompt_tokens": 6, "ttft_ms": 880.953, "prompt": "The capital of France is"},
+          {"prompt_tokens": 7, "ttft_ms": 1043.961, "prompt": "def add(a, b):"},
+          {"prompt_tokens": 12, "ttft_ms": 1796.246, "prompt": "1, 2, 3, 4,"}
+        ],
+        "evidence": [
+          {"path": "p24c4096_agent_stock/board_oracle3.json", "sha256": "a3748e82aa25bc77b269cf51743b140edbbe8c4c7d0b43734e780b76b04fed53"},
+          {"path": "p24c4096_agent_stock/board_eos.json", "sha256": "39a08c53fafc306835e7abf4c2263dbfe501f090ef0a3601bde80310c8c41df9"}
+        ]
+      },
+      {
+        "profile": "ctx8192",
+        "runtime": "mixed prefill window; both the legacy cached executor and the adopted zero-once v2_352 candidate",
+        "points": [
+          {"prompt_tokens": 5, "ttft_ms": 983.573, "prompt": "1+1 equals", "mode": "legacy cached"},
+          {"prompt_tokens": 6, "ttft_ms": 1206.344, "prompt": "The capital of France is", "mode": "legacy cached"},
+          {"prompt_tokens": 6, "ttft_ms": 946.248, "prompt": "The capital of France is", "mode": "zero-once"},
+          {"prompt_tokens": 7, "ttft_ms": 1424.957, "prompt": "def add(a, b):", "mode": "legacy cached"},
+          {"prompt_tokens": 7, "ttft_ms": 1110.582, "prompt": "def add(a, b):", "mode": "zero-once"},
+          {"prompt_tokens": 12, "ttft_ms": 2511.252, "prompt": "1, 2, 3, 4,", "mode": "legacy cached"},
+          {"prompt_tokens": 12, "ttft_ms": 1931.855, "prompt": "1, 2, 3, 4,", "mode": "zero-once"}
+        ],
+        "evidence": [
+          {"path": "p24c8192_agent_stock/board_oracle3.json", "sha256": "65c7261e9f30b6e6528b3e9a5323a49f41d41a8e4e565820c089ef6b38119e82"},
+          {"path": "p24c8192_agent_stock/board_zero_once_v2_352_oracle3.json", "sha256": "053b79df5caed8faae6cfd57cebc5e0cbef4a021efd1c565df9f1a6892e674c2"},
+          {"path": "p24c8192_agent_stock/board_eos.json", "sha256": "0918365c977795c5717767cb686e61c047f088938592b87d500acccace13a084"}
+        ]
+      },
+      {
+        "profile": "ctx128-bucket",
+        "runtime": "short-context decode bucket with the ctx1024 prefill handle at position 0; not a published runtime profile, included because it carries the only long-prompt TTFT measured anywhere",
+        "points": [
+          {"prompt_tokens": 5, "ttft_ms": 490.92, "prompt": "1+1 equals"},
+          {"prompt_tokens": 6, "ttft_ms": 585.358, "prompt": "The capital of France is"},
+          {"prompt_tokens": 9, "ttft_ms": 873.902, "prompt": "Chinese prompt"},
+          {"prompt_tokens": 121, "ttft_ms": 11495.294, "prompt": "121-token boundary probe", "mean_ms_per_prompt_position": 95.0}
+        ],
+        "evidence": [
+          {"path": "p24c128_shipping/board_reports/c128_shipping_boundary.json", "sha256": "fdd4e00f3164dd00e80a0bd90d47418a3d3729b50909519b7aa6e3784c1958a0"},
+          {"path": "p24c128_shipping/board_reports/c128_shipping_oracle3.json", "sha256": "86db1ff88ae3d6da90830193714e2e6987623dd5e8e27e898099abc71fb3bd02"},
+          {"path": "p24c128_shipping/board_reports/c128_shipping_eos_zh.json", "sha256": "3d70ed3610cfcd37f3c8527bec54196292f5b23491f61ea54a24633d3ee4901b"}
+        ]
+      }
+    ],
+    "prompt_head_skip": {
+      "claim": "skipping the vocabulary head and argmax on non-terminal prompt positions removes 21.2 ms per ingested token",
+      "measured_scope": "a 2-token prompt on ctx8192: 260.885 ms with the skip against 282.159 ms without, a 21.27 ms difference concentrated at position 0 (87.849 ms against 109.093 ms)",
+      "evidence": [
+        {"path": "p24c8192_agent_stock/board_promptskip_zero_once_16.json", "sha256": "5ab6b15bdfc57f2d973655b16ed1abd2eb2138323e7828a552d12fad8cfc76fb"},
+        {"path": "p24c8192_agent_stock/board_zero_once_v2_352_16.json", "sha256": "e6c14f285c128c51ac9ca9a627f3fe60abd1012423e254dcc9e9829a92c2ca89"}
+      ],
+      "long_prompt_status": "not measured; the source record marks its own long-prompt figure measured_long_prompt=false and accepted_as_long_prompt_qualification=false"
+    },
+    "unbound_prose_claims": {
+      "note": "these figures appear in README, CHANGELOG, the routing doc and the v0.1.0 release notes but have no retrievable per-step record anywhere; they were produced live on the board and only summarized. They are reproduced here as prose provenance, not as board-bound evidence, and no gate depends on them.",
+      "claims": [
+        "a rebased 810-token cold request fell from 86.70 s to 69.45 s (19.89%) under prompt head skip",
+        "a 643-token resident-prefix hit reduced the same request to 14.61 s, restoring the prefix in 7.15 ms"
+      ],
+      "resolution": "re-run both on the board with the report written to disk, then promote them into the measured table above"
+    },
+    "not_measured": [
+      "long-prompt TTFT for ctx1024, ctx4096 and ctx8192: the largest measured prompt on any published profile is 12 tokens",
+      "TTFT with a resident-prefix hit or a fixed-prefix snapshot: no run with those metrics was written to disk",
+      "TTFT with wide prefill blocks (S16/S32/S128): only strict S1 is enabled in the qualified release",
+      "cold-start model load is excluded from every number above; it was 2.6-12.9 s across the recorded runs"
+    ]
+  },
   "gate_binding": {
     "policy": "a performance number is publishable only alongside the numeric gate that the same artifact passed; throughput never substitutes for a cosine or token gate",
     "entries": [

@@ -103,6 +103,10 @@ identifier; large evidence is paged instead of copied into the conversation.
 A context is not a standalone integer. A runtime profile binds:
 
 - compiled context and past length;
+- the prefill window: the compiled context of the position-zero bootstrap
+  artifact, which may be smaller than capacity when the prefill handle is
+  inherited from a qualified smaller-context profile (the mixed
+  prefill-window contract);
 - decode, position-zero/prefill and head artifacts;
 - packed K/V geometry and runtime descriptor counts;
 - transformer K, V and hidden public-output slot indices;
@@ -143,6 +147,13 @@ remains ctx1024.
 Attempting `agent.sh --profile ctx128` fails before model handles are loaded and
 directs the operator to `chat.sh --profile ctx128`.
 
+Qualification state per profile: ctx1024 and ctx4096 are `qualified`
+(ctx4096 under the mixed prefill-window contract, gated by
+`release/contexts/ctx4096.qualification.json`); ctx128 and ctx8192 remain
+`pending`. ctx8192's candidate evidence is checked in at
+`release/contexts/ctx8192.qualification.json` and fails the strict-EOS
+sequence gate, so it still requires `--allow-unqualified-profile`.
+
 ### 4.2 Static ABI and memory
 
 For 24 layers, two K/V heads per layer, head dimension 128 and FP16 cache, one
@@ -159,11 +170,19 @@ packed K or V input occupies:
 | 4096 | 50,319,360 B (~48 MiB) | ~96 MiB |
 | 8192 | 100,651,008 B (~96 MiB) | ~192 MiB |
 
-The loader must fail closed unless profile context, attention-mask width, K/V
-past length and runtime `--context` agree. It must also validate artifact hashes
-once a profile is published. No silent truncation, inferred filename contract or
-cross-profile OM reuse is allowed. Tokenizer, embedding and vocabulary head may
-be shared when their ABI and hashes are identical.
+The loader must fail closed unless the decode attention-mask width and K/V past
+length agree with profile capacity, the prefill handle's mask width and K/V
+past length agree with the declared `prefill_window`, and runtime `--context`
+agrees with the profile. It must also validate artifact hashes once a profile
+is published. No silent truncation or inferred filename contract is allowed.
+Cross-profile OM reuse is forbidden except for the explicitly declared mixed
+prefill-window contract: an extended-context profile may inherit the frozen
+qualified ctx1024 `models/prefill.om` as its position-zero bootstrap, bound by
+hash in its `release/contexts/<profile>.qualification.json` record. Prompt
+tokens beyond position zero are ingested by the S1/native-prefill planner on
+the decode handle, so the window never bounds prompt length — capacity does.
+Tokenizer, embedding and vocabulary head may be shared when their ABI and
+hashes are identical.
 
 Published profiles bind distinct K/V/hidden slots covering outputs 0, 1 and 2.
 This replaces runtime KV characterization with a validated compile-time ABI and

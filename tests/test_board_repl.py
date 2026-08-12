@@ -1235,6 +1235,107 @@ def test_cli_plumbs_profile_context_and_activation_before_model_start(
         "schema": "fake.runtime", "enabled_widths": [1]}
 
 
+def test_cli_plumbs_mixed_prefill_window_profile(
+        monkeypatch, tmp_path: Path) -> None:
+    server = _server_module()
+    report = tmp_path / "report.json"
+    started = []
+
+    class Registry:
+        enabled_widths = (1,)
+
+        def to_dict(self):
+            return {"schema": "fake.runtime", "enabled_widths": [1]}
+
+    monkeypatch.setattr(
+        server.prefill_runtime_contract,
+        "load_runtime_registry", lambda **kwargs: Registry())
+
+    class Session:
+        models = [object(), object(), object()]
+        kv_slots = {0: (0, 1), 1: (0, 1)}
+        last_phase_steps = [{"position": 0, "head_skipped": False}]
+
+        def __init__(self, **kwargs):
+            started.append(kwargs)
+
+        def generate(self, *_args, **_kwargs):
+            return "max", [7], [1.0]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(server, "Merged", Session)
+    monkeypatch.setattr(sys, "argv", [
+        "merged_board_server.py", "--persistent-executor", "executor",
+        "--profile", "ctx4096", "--deployment-root", str(tmp_path),
+        "--embedding", "embedding.bin", "--prompt-ids", "11",
+        "--report", str(report),
+    ])
+
+    assert server.main() == 0
+    assert started[0]["context"] == 4096
+    assert started[0]["prefill_context"] == 1024
+    assert started[0]["prefill"] == tmp_path / "models/prefill.om"
+    assert started[0]["decode"] == tmp_path / "models/ctx4096/decode.om"
+
+
+def test_cli_rejects_host_kv_under_mixed_profile(
+        monkeypatch, capsys, tmp_path: Path) -> None:
+    server = _server_module()
+    monkeypatch.setattr(sys, "argv", [
+        "merged_board_server.py", "--persistent-executor", "executor",
+        "--profile", "ctx4096", "--deployment-root", str(tmp_path),
+        "--embedding", "embedding.bin", "--prompt-ids", "11",
+        "--host-kv",
+    ])
+    with pytest.raises(SystemExit):
+        server.main()
+    assert "mixed prefill window" in capsys.readouterr().err
+
+
+def test_mixed_descriptor_validation_uses_per_model_windows() -> None:
+    server = _server_module()
+    merged = server.Merged.__new__(server.Merged)
+    merged.context = 4096
+    merged.cache_bytes = server.CHANNELS * 4095 * server.HEAD_DIM * 2
+    merged.prefill_context = 1024
+    merged.prefill_cache_bytes = server.CHANNELS * 1023 * server.HEAD_DIM * 2
+    merged.decode_index = 0
+    merged.prefill_index = 1
+    rope = server.HEAD_DIM * server.HEAD_DIM * 4
+    outputs = (24576, 24576, 24576)
+    decode_inputs = (
+        24576, 4096 * 4, rope, merged.cache_bytes, merged.cache_bytes)
+    prefill_inputs = (
+        24576, 1024 * 4, rope,
+        merged.prefill_cache_bytes, merged.prefill_cache_bytes)
+    merged.descriptors = {
+        0: (decode_inputs, outputs),
+        1: (prefill_inputs, outputs),
+    }
+    merged._validate_context_descriptors()
+
+    merged.descriptors[1] = (decode_inputs, outputs)
+    with pytest.raises(RuntimeError, match="ctx1024"):
+        merged._validate_context_descriptors()
+
+
+def test_mixed_init_guards_fail_closed(tmp_path: Path) -> None:
+    server = _server_module()
+    with pytest.raises(RuntimeError, match="dedicated prefill handle"):
+        server.Merged(
+            executable="x", decode="d", prefill=None, head="h",
+            library_paths=[], embedding=tmp_path / "embedding.bin",
+            context=4096, timeout=1.0,
+            transformer_output_slots=(0, 1, 2), prefill_context=1024)
+    with pytest.raises(RuntimeError, match="dynamic probing"):
+        server.Merged(
+            executable="x", decode="d", prefill="p", head="h",
+            library_paths=[], embedding=tmp_path / "embedding.bin",
+            context=4096, timeout=1.0, prefill_context=1024)
+
+
 def test_cli_rejects_invalid_strict_s1_before_model_start(
         monkeypatch, capsys, tmp_path: Path) -> None:
     server = _server_module()

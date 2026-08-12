@@ -1,21 +1,38 @@
 {
-  "schema": "pico.minicpm5.runtime-profile.v1",
+  "schema": "pico.minicpm5.runtime-profile.v2",
   "name": "ctx128",
   "status": "pending",
-  "context": {"capacity": 128, "past_length": 127},
-  "capabilities": {"chat": true, "agent": false, "completion": true},
+  "context": {
+    "capacity": 128,
+    "past_length": 127,
+    "prefill_window": 128
+  },
+  "capabilities": {
+    "chat": true,
+    "agent": false,
+    "completion": true
+  },
   "generation": {
     "default_max_new": 32,
     "max_new_limit": 64,
     "reserve_tokens": 16,
     "compact_at_tokens": 96
   },
-  "agent": {"max_tool_steps": 0, "max_tool_output_chars": 256},
+  "agent": {
+    "max_tool_steps": 0,
+    "max_tool_output_chars": 256
+  },
   "models": {
     "decode": "models/ctx128/decode.om",
     "prefill": "models/ctx128/prefill.om",
     "head": "models/head_flat.om"
   },
-  "transformer_outputs": {"k": 0, "v": 1, "hidden": 2},
-  "numeric_gate": {"minimum_cosine_exclusive": 0.98}
+  "transformer_outputs": {
+    "k": 0,
+    "v": 1,
+    "hidden": 2
+  },
+  "numeric_gate": {
+    "minimum_cosine_exclusive": 0.98
+  }
 }

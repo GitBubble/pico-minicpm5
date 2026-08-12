@@ -23,8 +23,8 @@ Python package is needed.
 │            qualify_minicpm_greedy_chain.py}
 ├── models/{prefill.om,decode.om,head_flat.om}          # qualified ctx1024
 ├── models/ctx128/{prefill.om,decode.om}                # when qualified
-├── models/ctx4096/{prefill.om,decode.om}               # when qualified
-├── models/ctx8192/{prefill.om,decode.om}               # when qualified
+├── models/ctx4096/decode.om                            # qualified; prefill is the shared models/prefill.om
+├── models/ctx8192/decode.om                            # pending (strict-EOS gate); shared prefill
 └── assets/{token_embedding.f16.bin,tokenizer.json}
 ```
 

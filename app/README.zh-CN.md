@@ -22,8 +22,8 @@
 │            qualify_minicpm_greedy_chain.py}
 ├── models/{prefill.om,decode.om,head_flat.om}          # 已验收 ctx1024
 ├── models/ctx128/{prefill.om,decode.om}                # 验收后放入
-├── models/ctx4096/{prefill.om,decode.om}               # 验收后放入
-├── models/ctx8192/{prefill.om,decode.om}               # 验收后放入
+├── models/ctx4096/decode.om                            # 已资格化；prefill 共享 models/prefill.om
+├── models/ctx8192/decode.om                            # pending（严格 EOS 门未过）；prefill 同上共享
 └── assets/{token_embedding.f16.bin,tokenizer.json}
 ```
 

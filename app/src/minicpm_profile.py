@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 
 
-SCHEMA = "pico.minicpm5.runtime-profile.v1"
+SCHEMA = "pico.minicpm5.runtime-profile.v2"
 KNOWN_CONTEXTS = (128, 1024, 4096, 8192)
 _NAME = re.compile(r"[a-z0-9][a-z0-9_-]*")
 
@@ -46,6 +46,7 @@ class RuntimeProfile:
     status: str
     context: int
     past_length: int
+    prefill_window: int
     chat: bool
     agent: bool
     completion: bool
@@ -126,14 +127,21 @@ def load_runtime_profile(value: str, profiles_dir: Path) -> RuntimeProfile:
         raise ProfileError("profile status must be qualified or pending")
 
     context = raw["context"]
-    if not isinstance(context, dict) or set(context) != {"capacity", "past_length"}:
-        raise ProfileError("context must contain capacity and past_length")
+    if not isinstance(context, dict) or set(context) != {
+            "capacity", "past_length", "prefill_window"}:
+        raise ProfileError(
+            "context must contain capacity, past_length and prefill_window")
     capacity = _integer(context["capacity"], "context.capacity", 2, 65536)
     if capacity not in KNOWN_CONTEXTS:
         raise ProfileError(f"context.capacity must be one of {KNOWN_CONTEXTS}")
     past = _integer(context["past_length"], "context.past_length", 1, capacity)
     if past != capacity - 1:
         raise ProfileError("context.past_length must equal capacity - 1")
+    window = _integer(
+        context["prefill_window"], "context.prefill_window", 2, capacity)
+    if window not in KNOWN_CONTEXTS:
+        raise ProfileError(
+            f"context.prefill_window must be one of {KNOWN_CONTEXTS}")
 
     capabilities = raw["capabilities"]
     if not isinstance(capabilities, dict) or set(capabilities) != {
@@ -195,7 +203,7 @@ def load_runtime_profile(value: str, profiles_dir: Path) -> RuntimeProfile:
 
     return RuntimeProfile(
         source=path, name=name, status=status, context=capacity,
-        past_length=past, chat=chat, agent=agent_enabled,
+        past_length=past, prefill_window=window, chat=chat, agent=agent_enabled,
         completion=completion, default_max_new=default_max,
         max_new_limit=max_limit, reserve_tokens=reserve,
         compact_at_tokens=compact_at, max_tool_steps=tool_steps,

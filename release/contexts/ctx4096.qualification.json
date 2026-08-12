@@ -1,0 +1,77 @@
+{
+  "schema": "pico.minicpm5.context-profile-qualification.v1",
+  "profile": "ctx4096",
+  "target": {
+    "soc": "Hi3403",
+    "npu_arch": "V101",
+    "context": 4096,
+    "prefill_window": 1024
+  },
+  "contract": {
+    "kind": "mixed-prefill-window",
+    "decode": {
+      "deployment_path": "models/ctx4096/decode.om",
+      "bytes": 687076012,
+      "sha256": "9f456c6b5d716fc97d9be936767e0464eb9868ab3abcd172163139c7bd05254e"
+    },
+    "prefill": {
+      "deployment_path": "models/prefill.om",
+      "bytes": 686999901,
+      "sha256": "fea09d294513839ccab846050193def475859f4352e2cb3fad7c2f8f1dfa4536"
+    },
+    "head": {
+      "deployment_path": "models/head_flat.om",
+      "bytes": 202651666,
+      "sha256": "fd6675f4aad9d7244471afc637f4964c79a7504b2c73a350985f2d807105330e"
+    }
+  },
+  "numeric_gate": {
+    "cosine_threshold_exclusive": 0.98,
+    "public_outputs": [
+      {"position": 1, "runner": "libinstsim", "next_hidden": 0.9975780878, "packed_k": 0.9994113974, "packed_v": 0.9978530041},
+      {"position": 1024, "runner": "libinstsim", "next_hidden": 0.996727205, "packed_k": 0.999130079, "packed_v": 0.996129546},
+      {"position": 2048, "runner": "libinstsim", "next_hidden": 0.9932670274, "packed_k": 0.9992014059, "packed_v": 0.997279086},
+      {"position": 4095, "runner": "libinstsim", "next_hidden": 0.9908199813, "packed_k": 0.9981887329, "packed_v": 0.994471406},
+      {"position": 1, "runner": "board", "next_hidden": 0.997975382, "packed_k": 0.9993904716, "packed_v": 0.9977053694},
+      {"position": 4095, "runner": "board", "next_hidden": 0.9908199813, "packed_k": 0.9981887329, "packed_v": 0.994471406}
+    ],
+    "minimum_public_output": 0.9908199813,
+    "board_tail_byte_exact_position": 4095
+  },
+  "gates": {
+    "greedy_oracle": {"prompts": 3, "tokens_exact": 48, "tokens_total": 48},
+    "eos": {"token_sequence_exact": true, "finish_reason": "eos"},
+    "context_boundary": {
+      "position": 4096,
+      "rejected_before_model_load": true,
+      "stderr_artifact_bound": true
+    },
+    "board_load": {"handles": 3},
+    "performance": {
+      "total_p50_ms": 153.117,
+      "total_p95_ms": 154.678,
+      "tokens_per_second": 6.531
+    }
+  },
+  "diagnostics_nonblocking": {
+    "worst_per_layer_slice": {
+      "position": 4095,
+      "slice": "layer4-packed-v",
+      "cosine": 0.9774770371
+    },
+    "note": "one per-layer K/V slice sits below the gate at the last valid position; all three public outputs stay strictly above it at every tested position, and the board tail output is byte-exact with libinstsim"
+  },
+  "evidence": {
+    "source_record": "MINICPM5_CONTEXT4096_QUALIFICATION.json",
+    "source_sha256": "527a60e4471a534ab5e0172f0afe5a434d2e250cc3719ccfdc5cc612c1bc134b",
+    "location": "integration monorepo; evidence artifacts are not distributed in this repository"
+  },
+  "verdict": {
+    "public_output_numeric": "PASS",
+    "greedy_exact": "PASS",
+    "eos": "PASS",
+    "context_boundary": "PASS",
+    "board_load": "PASS",
+    "overall": "PASS"
+  }
+}

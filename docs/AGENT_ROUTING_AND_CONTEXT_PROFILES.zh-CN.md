@@ -89,6 +89,9 @@ schema。工具结果由类型元数据、紧凑预览和稳定 result_id 组成
 Context 不是一个孤立整数。Runtime profile 必须同时绑定：
 
 - 编译 context 与 past length；
+- prefill 窗口：position-zero bootstrap 产物的编译 context。当 prefill 句柄
+  继承自更小 context 的已资格化 profile 时（混合 prefill 窗口合同），它可以
+  小于 capacity；
 - decode、position-zero/prefill、head 产物；
 - packed K/V 几何和 runtime descriptor 数量；
 - transformer K、V、hidden 公开输出槽索引；
@@ -128,6 +131,12 @@ Profile 在进程启动时选择：
 执行 `agent.sh --profile ctx128` 必须在加载模型句柄前失败，并提示改用
 `chat.sh --profile ctx128`。
 
+各 profile 的资格状态：ctx1024 与 ctx4096 为 `qualified`（ctx4096 走混合
+prefill 窗口合同，由 `release/contexts/ctx4096.qualification.json` 把关）；
+ctx128 与 ctx8192 保持 `pending`。ctx8192 的候选证据已入库
+（`release/contexts/ctx8192.qualification.json`），严格 EOS 序列门 FAIL，
+因此仍需 `--allow-unqualified-profile`。
+
 ### 4.2 静态 ABI 与内存
 
 24 层、每层 2 个 KV head、head_dim=128、FP16 cache 时，单个 packed K 或 V：
@@ -143,9 +152,15 @@ Profile 在进程启动时选择：
 | 4096 | 50,319,360 B（约 48 MiB） | 约 96 MiB |
 | 8192 | 100,651,008 B（约 96 MiB） | 约 192 MiB |
 
-加载器必须验证 profile context、attention mask 宽度、K/V past length 与 runtime
-`--context` 完全一致；发布 profile 还必须校验产物 hash。禁止静默截断、根据文件名
-猜合同或跨 profile 复用不匹配的 OM。ABI/hash 相同时 tokenizer、embedding 和
+加载器必须 fail-closed：decode 的 attention mask 宽度与 K/V past length 对齐
+profile capacity，prefill 句柄的 mask 宽度与 K/V past length 对齐声明的
+`prefill_window`，runtime `--context` 与 profile 一致；发布 profile 还必须校验
+产物 hash。禁止静默截断、根据文件名猜合同。跨 profile 复用 OM 仅允许显式声明
+的混合 prefill 窗口合同：扩展 context profile 可以继承冻结的已资格化 ctx1024
+`models/prefill.om` 作为 position-zero bootstrap，并在
+`release/contexts/<profile>.qualification.json` 记录中按 hash 绑定。position 0
+之后的 prompt token 由 decode 句柄上的 S1/native-prefill 规划器摄入，因此窗口
+从不限制 prompt 长度——capacity 才限制。ABI/hash 相同时 tokenizer、embedding 和
 vocabulary head 可以共享。
 
 已发布 profile 绑定互不重复且完整覆盖 0、1、2 的 K/V/hidden 槽位。这用

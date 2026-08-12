@@ -2,6 +2,35 @@
 
 [中文](CHANGELOG.zh-CN.md)
 
+## Unreleased
+
+### Mixed prefill-window contract and extended-context numeric gate - 2026-08-12
+
+- Runtime profiles move to schema v2 with an explicit `context.prefill_window`.
+  ctx4096 and ctx8192 formalize the mixed contract already exercised on the
+  board: position zero bootstraps on the frozen qualified ctx1024
+  `models/prefill.om`, the per-context decode OM owns the full context, and
+  prompt tokens after position zero go through the S1/native-prefill planner.
+- The board server validates the prefill handle against its own declared
+  window (mask width and K/V cache bytes), forbids host-KV mirroring and
+  dynamic slot probing under a mixed profile, and reports the window at
+  startup.
+- Added `release/contexts/` qualification records and a pure-JSON validator
+  (`pico-minicpm5 qualify-context-profile`) in the mold of the frozen ctx1024
+  gate: threshold floor `0.98` exclusive over all public outputs, positions
+  including the last valid one, greedy/EOS/boundary/board-load verdicts, and
+  hash bindings for the decode OM, inherited prefill/head and source evidence.
+- ctx4096 flips to `qualified`: minimum public-output cosine `0.9908` at
+  position 4095, board tail byte-exact with libinstsim, 48/48 greedy tokens,
+  EOS and boundary fail-closed all PASS (`6.53 token/s` at p50 `153.1 ms`).
+- ctx8192 stays `pending` with its candidate evidence checked in: public
+  outputs clear the gate (minimum `0.9861`), but the strict-EOS sequence gate
+  fails, calibration is donor-zero-extended rather than native, and the
+  overall verdict is `CANDIDATE_STRICT_EOS_FAIL`.
+- Added the OpenClaw adapter package under `app/openclaw/` with the bilingual
+  user guide `docs/OPENCLAW_USAGE.zh-CN.md`; v0.1.0/ctx1024 remains below
+  OpenClaw's 4096-token floor and must not be shipped as OpenClaw-ready.
+
 ## 0.1.0 - 2026-08-09
 
 ### Runtime refresh - 2026-08-10

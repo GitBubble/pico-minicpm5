@@ -408,7 +408,21 @@ class Merged:
     def __init__(self, *, executable, decode, prefill, head, library_paths,
                  embedding, context, timeout, tokenizer=None,
                  resident_kv=True, quiet_executor=False,
-                 transformer_output_slots=None, prefill_runtime=None):
+                 transformer_output_slots=None, prefill_runtime=None,
+                 prefill_context=None):
+        if prefill_context is None:
+            prefill_context = context
+        if prefill_context > context or prefill_context < 2:
+            raise RuntimeError(
+                "prefill context window must be in [2, context]")
+        if prefill_context != context and prefill is None:
+            raise RuntimeError(
+                "a mixed prefill window requires a dedicated prefill handle")
+        if prefill_context != context and transformer_output_slots is None:
+            raise RuntimeError(
+                "a mixed prefill window requires trusted static "
+                "transformer output slots; dynamic probing assumes one "
+                "uniform context")
         if prefill_runtime is None:
             prefill_runtime = prefill_runtime_contract.strict_s1_runtime(context)
         if prefill_runtime.context != context:
@@ -439,9 +453,12 @@ class Merged:
             wide_models.append(handler.spec.model_path)
         self.context = context
         self.past = context - 1
+        self.prefill_context = prefill_context
         self.timeout = timeout
         self.row_f16 = HEAD_DIM * 2
         self.cache_bytes = CHANNELS * self.past * HEAD_DIM * 2
+        self.prefill_cache_bytes = (
+            CHANNELS * (prefill_context - 1) * HEAD_DIM * 2)
         self.embed = open(embedding, "rb")
         self._embedding_half = struct.Struct(f"<{HIDDEN}e")
         self._embedding_f32 = struct.Struct(f"<{HIDDEN}f")
@@ -653,24 +670,32 @@ class Merged:
         raise RuntimeError(f"model {index} publishes no hidden")
 
     def _validate_context_descriptors(self):
-        """Fail before execution when an OM does not match runtime context."""
-        expected = (
-            self.context * 4,
-            HEAD_DIM * HEAD_DIM * 4,
-            self.cache_bytes,
-            self.cache_bytes,
-        )
-        for model in {self.decode_index, self.prefill_index}:
+        """Fail before execution when an OM does not match runtime context.
+
+        Under the mixed prefill contract the position-zero handle keeps
+        the compiled ABI of its own (smaller) qualified context window,
+        while the decode handle owns the full runtime context."""
+        windows = {self.decode_index: (self.context, self.cache_bytes)}
+        if self.prefill_index != self.decode_index:
+            windows[self.prefill_index] = (
+                self.prefill_context, self.prefill_cache_bytes)
+        for model, (window, cache_bytes) in windows.items():
+            expected = (
+                window * 4,
+                HEAD_DIM * HEAD_DIM * 4,
+                cache_bytes,
+                cache_bytes,
+            )
             inputs, outputs = self.descriptors[model]
             if len(inputs) < 5 or len(outputs) != 3:
                 raise RuntimeError(
                     f"model {model}: expected >=5 inputs/3 outputs for "
-                    f"ctx{self.context}, got {len(inputs)}/{len(outputs)}")
+                    f"ctx{window}, got {len(inputs)}/{len(outputs)}")
             observed = tuple(inputs[1:5])
             if observed != expected:
                 raise RuntimeError(
                     f"model {model}: descriptor/context mismatch for "
-                    f"ctx{self.context}; mask/rope/k/v={observed}, "
+                    f"ctx{window}; mask/rope/k/v={observed}, "
                     f"expected={expected}")
 
     def _bind_output_slots(self, slots):
@@ -1075,6 +1100,13 @@ class Merged:
         # session first.
         self._require_live_wide_session()
         host_kv = not self.resident_kv or kv_in is not None or kv_out is not None
+        # Object-level diagnostic tests construct sessions without __init__;
+        # they always run the uniform single-context contract.
+        prefill_window = getattr(self, "prefill_context", self.context)
+        if host_kv and prefill_window != self.context:
+            raise RuntimeError(
+                "host KV mirroring assumes one uniform context; the mixed "
+                "prefill-window contract requires resident KV")
         if reuse_prefix and (host_kv or start != 0):
             raise ValueError(
                 "prefix reuse requires resident KV and start position zero")
@@ -1232,10 +1264,16 @@ class Merged:
             model = (self.prefill_index if position == 0 else self.decode_index)
             desc_in = self.descriptors[model][0]
 
-            mask = bytearray(struct.pack("<f", gc.MASK_NEG) * self.context)
+            # Position 0 runs on the prefill handle, whose mask carries the
+            # width of its own compiled window (== context except under the
+            # mixed prefill contract, where a smaller qualified window
+            # bootstraps a longer decode context).
+            mask_width = (
+                prefill_window if position == 0 else self.context)
+            mask = bytearray(struct.pack("<f", gc.MASK_NEG) * mask_width)
             for slot in range(position):
                 struct.pack_into("<f", mask, slot * 4, 0.0)
-            struct.pack_into("<f", mask, (self.context - 1) * 4, 0.0)
+            struct.pack_into("<f", mask, (mask_width - 1) * 4, 0.0)
 
             writes = [(0, 0, self._hidden_input(token, desc_in[0])),
                       (1, 0, bytes(mask)),
@@ -1512,6 +1550,13 @@ def main() -> int:
                 f"--context {args.context} conflicts with profile "
                 f"{runtime_profile.name} ctx{runtime_profile.context}")
         args.context = runtime_profile.context
+        args.prefill_context = runtime_profile.prefill_window
+        if args.host_kv and args.prefill_context != args.context:
+            ap.error(
+                f"--host-kv is incompatible with profile "
+                f"{runtime_profile.name}: its mixed prefill window "
+                f"({args.prefill_context} < {args.context}) requires "
+                "resident KV")
         if args.max_new is None:
             args.max_new = runtime_profile.default_max_new
         if args.max_tool_steps is None:
@@ -1530,6 +1575,7 @@ def main() -> int:
         args.transformer_output_slots = profile_slots
     else:
         args.context = 1024 if args.context is None else args.context
+        args.prefill_context = args.context
         args.max_new = 128 if args.max_new is None else args.max_new
         args.max_tool_steps = 4 if args.max_tool_steps is None else args.max_tool_steps
         args.max_new_limit = args.context - 1
@@ -1602,6 +1648,7 @@ def main() -> int:
                          resident_kv=not args.host_kv,
                          transformer_output_slots=args.transformer_output_slots,
                          prefill_runtime=prefill_runtime,
+                         prefill_context=args.prefill_context,
                          quiet_executor=(args.interactive or args.chat or args.agent)
                          and not args.verbose_executor)
     finally:
@@ -1619,10 +1666,13 @@ def main() -> int:
                 f"executor-ready={startup['executor_ready'] / 1000.0:.1f}s · "
                 f"tokenizer={startup['tokenizer'] / 1000.0:.1f}s overlapped · "
                 f"{kv_status}")
+        window_label = (
+            "" if args.prefill_context == args.context
+            else f" · prefill-window={args.prefill_context}")
         ui.info(
             f"profile={args.profile_name} · ctx{args.context} · "
             f"max-new={args.max_new} · configured-limit={args.max_new_limit} · "
-            f"prefill={prefill_label}")
+            f"prefill={prefill_label}{window_label}")
     else:
         print(f"loaded {len(session.models)} handles in {load_ms / 1000:.1f} s; "
               f"kv slots {session.kv_slots}", flush=True)

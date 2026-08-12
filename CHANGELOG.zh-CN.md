@@ -2,6 +2,30 @@
 
 [English](CHANGELOG.md)
 
+## 未发布
+
+### 混合 prefill 窗口合同与扩展 context 数值门 - 2026-08-12
+
+- Runtime profile 升级到 schema v2，显式声明 `context.prefill_window`。
+  ctx4096 与 ctx8192 把板端早已在跑的混合合同写成正式合同：position 0 用冻结
+  的已资格化 ctx1024 `models/prefill.om` 引导，各 context 的 decode OM 拥有
+  完整上下文，position 0 之后的 prompt token 走 S1/native-prefill 规划器。
+- 板端 server 按 prefill 句柄自己声明的窗口校验描述符（mask 宽度与 K/V cache
+  字节数），混合 profile 下拒绝 host-KV 镜像与动态槽位探测，启动时报告窗口。
+- 新增 `release/contexts/` 资格记录与纯 JSON 校验器
+  （`pico-minicpm5 qualify-context-profile`），沿用冻结 ctx1024 门的形制：
+  全部公开输出严格高于 `0.98`、位置覆盖最后有效位、贪心/EOS/边界/板载判定、
+  以及 decode OM、继承 prefill/head 与源证据的 hash 绑定。
+- ctx4096 翻为 `qualified`：position 4095 最低公开输出 cosine `0.9908`，板端
+  尾部与 libinstsim 逐字节一致，48/48 贪心 token、EOS 与边界 fail-closed 全部
+  PASS（p50 `153.1 ms`，`6.53 token/s`）。
+- ctx8192 保持 `pending`，候选证据如实入库：公开输出过门（最低 `0.9861`），
+  但严格 EOS 序列门 FAIL，标定为 donor 零扩展而非原生，总判定
+  `CANDIDATE_STRICT_EOS_FAIL`。
+- 新增 `app/openclaw/` OpenClaw 适配包与中文使用指南
+  `docs/OPENCLAW_USAGE.zh-CN.md`；v0.1.0/ctx1024 仍低于 OpenClaw 的 4096 token
+  下限，不得作为 OpenClaw-ready 发行。
+
 ## 0.1.0 - 2026-08-09
 
 ### Runtime 增量刷新 - 2026-08-10

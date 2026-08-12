@@ -10,6 +10,7 @@ import sys
 from . import __version__
 from .assets import export_runtime_assets
 from .calibration import build_calibration_bundle
+from .context_profiles import verify_file as verify_context_profile_file
 from .compiler.atc import AtcCompiler
 from .compiler.fake import FakeCompiler
 from .contract import HF_REVISION, verify_checkpoint
@@ -181,6 +182,12 @@ def _prefill_block_qualification_command(subparsers) -> None:
     )
     strict_s1.add_argument("--evidence", type=Path, required=True)
     strict_s1.add_argument("--out", type=Path, required=True)
+    context_profile = subparsers.add_parser(
+        "qualify-context-profile",
+        help=("verify a checked-in extended-context profile qualification "
+              "record (pure JSON, no artifacts required)"),
+    )
+    context_profile.add_argument("--record", type=Path, required=True)
 
 
 def _capture_command(subparsers) -> None:
@@ -404,6 +411,10 @@ def main(argv=None) -> int:
         _emit(qualify_prefill_s1_release_file(
             evidence=args.evidence, output=args.out))
         return 0
+    if args.command == "qualify-context-profile":
+        summary = verify_context_profile_file(args.record)
+        _emit(summary)
+        return 0 if summary["passes"] else 1
     if args.command == "release":
         if args.release_command == "assemble":
             _emit(assemble_bundle(models=args.models, model_dir=args.model_dir,

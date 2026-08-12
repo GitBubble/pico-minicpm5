@@ -35,12 +35,21 @@ def test_builtin_profile_matrix_and_limits(tmp_path: Path) -> None:
     assert loaded["ctx128"].chat and not loaded["ctx128"].agent
     assert all(loaded[name].agent for name in ("ctx1024", "ctx4096", "ctx8192"))
     assert loaded["ctx1024"].status == "qualified"
+    assert loaded["ctx4096"].status == "qualified"
+    assert loaded["ctx8192"].status == "pending"
     assert loaded["ctx4096"].max_new_limit == 512
     assert loaded["ctx8192"].max_new_limit == 1024
     assert loaded["ctx1024"].kv_output_slots == (0, 1)
     assert loaded["ctx1024"].hidden_output_slot == 2
     assert loaded["ctx4096"].model_paths(tmp_path)["decode"] == (
         tmp_path / "models/ctx4096/decode.om")
+    # Mixed prefill-window contract: the extended contexts bootstrap
+    # position 0 with the qualified ctx1024 prefill binary.
+    assert [loaded[name].prefill_window for name in loaded] == [
+        128, 1024, 1024, 1024]
+    for name in ("ctx4096", "ctx8192"):
+        assert loaded[name].model_paths(tmp_path)["prefill"] == (
+            tmp_path / "models/prefill.om")
 
 
 def test_ctx128_agent_fails_before_pending_status() -> None:
@@ -56,11 +65,44 @@ def test_ctx128_agent_fails_before_pending_status() -> None:
 
 def test_pending_long_context_needs_explicit_development_override() -> None:
     profiles = _module()
-    ctx4096 = profiles.load_runtime_profile("ctx4096", PROFILES)
+    ctx8192 = profiles.load_runtime_profile("ctx8192", PROFILES)
 
     with pytest.raises(profiles.ProfileError, match="allow-unqualified-profile"):
-        ctx4096.require_mode("agent")
-    ctx4096.require_mode("agent", allow_unqualified=True)
+        ctx8192.require_mode("agent")
+    ctx8192.require_mode("agent", allow_unqualified=True)
+
+
+def test_qualified_mixed_contract_profile_needs_no_override() -> None:
+    profiles = _module()
+    ctx4096 = profiles.load_runtime_profile("ctx4096", PROFILES)
+
+    ctx4096.require_mode("agent")
+    assert ctx4096.prefill_window == 1024
+
+
+def test_profile_rejects_prefill_window_contract_drift(tmp_path: Path) -> None:
+    profiles = _module()
+
+    source = json.loads((PROFILES / "ctx1024.json").read_text())
+    source["context"]["prefill_window"] = 512
+    malformed = tmp_path / "unknown-window.json"
+    malformed.write_text(json.dumps(source), encoding="utf-8")
+    with pytest.raises(profiles.ProfileError, match="prefill_window"):
+        profiles.load_runtime_profile(str(malformed), PROFILES)
+
+    source = json.loads((PROFILES / "ctx1024.json").read_text())
+    source["context"]["prefill_window"] = 4096
+    malformed = tmp_path / "window-over-capacity.json"
+    malformed.write_text(json.dumps(source), encoding="utf-8")
+    with pytest.raises(profiles.ProfileError, match="prefill_window"):
+        profiles.load_runtime_profile(str(malformed), PROFILES)
+
+    source = json.loads((PROFILES / "ctx1024.json").read_text())
+    del source["context"]["prefill_window"]
+    malformed = tmp_path / "missing-window.json"
+    malformed.write_text(json.dumps(source), encoding="utf-8")
+    with pytest.raises(profiles.ProfileError, match="prefill_window"):
+        profiles.load_runtime_profile(str(malformed), PROFILES)
 
 
 def test_profile_rejects_context_and_path_contract_drift(tmp_path: Path) -> None:

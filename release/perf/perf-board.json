@@ -1,0 +1,291 @@
+{
+  "schema": "pico.minicpm5.performance-board.v1",
+  "generated_from": "existing board evidence only; no new measurement was taken to build this board",
+  "target": {
+    "soc": "Hi3403",
+    "npu_arch": "V101",
+    "board_family": "SS928-class development board"
+  },
+  "method": {
+    "phases": [
+      "prepare: host-side embedding row, attention mask and RoPE matrix preparation",
+      "transformer: resident 24-layer decode (or position-zero prefill) handle execution",
+      "kv: packed K/V publication into the canonical resident decode cache",
+      "head: vocabulary head handle execution",
+      "argmax: host-side argmax over the dense logits"
+    ],
+    "steady_state": "median over decode steps at position >= 1; position 0 runs on the prefill handle and is reported separately",
+    "scopes": {
+      "gate_reported": "the median scope the profile's own gate record publishes; this is the authoritative headline number",
+      "phase_breakdown": "pooled per-phase medians over the runs' position >= 1 records, which for a greedy-oracle run also include teacher-forced prompt steps; the two scopes agree to better than 0.1% where both exist"
+    },
+    "tokens_per_second": "derived as 1000 / total p50; not stored in the evidence files",
+    "tail_positions": "the last valid position of each context is measured in its own single-step run immediately after model load, so first-step warm-up cannot be separated from the position cost; excluded from steady state"
+  },
+  "contexts": [
+    {
+      "profile": "ctx1024",
+      "context": 1024,
+      "prefill_window": 1024,
+      "status": "qualified",
+      "contract": "uniform (decode and prefill share the compiled context)",
+      "runtime_mode": "resident packed K/V",
+      "steady_state_p50_ms": {
+        "prepare": 1.3072919973637909,
+        "transformer": 82.66466650093207,
+        "kv": 0.36749950231751427,
+        "head": 20.371353999507846,
+        "argmax": 0.9376044981763698,
+        "total": 105.66195899809827
+      },
+      "tokens_per_second": {
+        "range": [9.423795766669281, 9.475671622659606],
+        "baseline_49_handle_range": [4.89, 4.92],
+        "speedup_over_baseline": 1.91
+      },
+      "position_zero_ms": null,
+      "tail": null,
+      "gate_record": "release/v0.1.0/qualification.json",
+      "evidence": {
+        "in_repo": true,
+        "note": "phase medians and throughput are the performance block of the frozen v0.1.0 qualification record"
+      }
+    },
+    {
+      "profile": "ctx4096",
+      "context": 4096,
+      "prefill_window": 1024,
+      "status": "qualified",
+      "contract": "mixed prefill window (position zero on the frozen ctx1024 prefill.om)",
+      "runtime_mode": "resident packed K/V",
+      "gate_reported": {
+        "scope": "48 scored greedy-oracle generated tokens",
+        "total_p50_ms": 153.1166455,
+        "total_p95_ms": 154.6779517,
+        "transformer_p50_ms": 129.6994165,
+        "tokens_per_second": 6.53097
+      },
+      "steady_state_p50_ms": {
+        "prepare": 1.543,
+        "transformer": 129.7,
+        "kv": 0.447,
+        "head": 20.398,
+        "argmax": 0.999,
+        "total": 153.202
+      },
+      "steady_state_p95_ms": {
+        "prepare": 3.026,
+        "transformer": 129.886,
+        "kv": 0.462,
+        "head": 20.436,
+        "argmax": 1.193,
+        "total": 154.725
+      },
+      "steady_state_scope": "67 pooled steps at position >= 1 across 3 prompts (generated tokens plus teacher-forced prompt steps); 0.06% above the gate-reported scope",
+      "steady_state_steps": 67,
+      "tokens_per_second": {
+        "steady_state": 6.53
+      },
+      "position_zero_ms": {
+        "transformer": 86.31,
+        "total": 109.52,
+        "note": "position zero is ~43 ms faster than a steady decode step, entirely in the transformer phase, because the inherited ctx1024 prefill handle attends over a 1024-entry window instead of 4096"
+      },
+      "tail": {
+        "position": 4095,
+        "total_ms": 327.91,
+        "phase_ms": {
+          "prepare": 8.005,
+          "transformer": 294.454,
+          "kv": 3.755,
+          "head": 20.673,
+          "argmax": 1.024
+        },
+        "note": "single-step run after model load; head and argmax are unchanged, so the inflation is attention over the full window plus first-step warm-up, which the evidence cannot separate"
+      },
+      "gate_record": "release/contexts/ctx4096.qualification.json",
+      "evidence": {
+        "in_repo": false,
+        "source_record": "MINICPM5_CONTEXT4096_QUALIFICATION.json",
+        "source_sha256": "527a60e4471a534ab5e0172f0afe5a434d2e250cc3719ccfdc5cc612c1bc134b",
+        "files": [
+          {
+            "path": "p24c4096_agent_stock/board_oracle3.json",
+            "sha256": "a3748e82aa25bc77b269cf51743b140edbbe8c4c7d0b43734e780b76b04fed53",
+            "provides": "steady-state and position-zero phase records over 3 prompts / 48 generated tokens"
+          },
+          {
+            "path": "p24c4096_agent_stock/board_pos4095.json",
+            "sha256": "7ac8267ab03f3ea40c87aa645a88460b49121a971f0d569efa3047ceed698c24",
+            "provides": "the last-valid-position single-step record"
+          }
+        ]
+      }
+    },
+    {
+      "profile": "ctx8192",
+      "context": 8192,
+      "prefill_window": 1024,
+      "status": "pending",
+      "contract": "mixed prefill window (position zero on the frozen ctx1024 prefill.om)",
+      "runtime_mode": "resident packed K/V, zero-once v2_352 executor candidate",
+      "gate_reported": {
+        "scope": "16-token cache-policy A/B run of the adopted zero-once candidate",
+        "total_p50_ms": 167.112812,
+        "transformer_p50_ms": 139.85125,
+        "tokens_per_second": 5.983982
+      },
+      "steady_state_scope": "16 steps at position >= 1 of the adopted-mode A/B run; the 48-token resident oracle of the same mode is slightly faster at 165.661 ms / 6.036 tok/s",
+      "steady_state_p50_ms": {
+        "prepare": 2.929,
+        "transformer": 139.851,
+        "kv": 2.694,
+        "head": 20.666,
+        "argmax": 0.989,
+        "total": 167.113
+      },
+      "steady_state_steps": 16,
+      "tokens_per_second": {
+        "steady_state": 5.98,
+        "oracle_pooled": 6.036,
+        "legacy_cached_oracle_pooled": 4.586
+      },
+      "position_zero_ms": {
+        "transformer": 85.934,
+        "total": 109.093,
+        "with_prompt_head_skip": 87.849,
+        "note": "the ~86 ms transformer time matches ctx4096 exactly, confirming both contexts bootstrap on the same ctx1024-ABI prefill handle; the head skip removes head and argmax entirely on non-terminal teacher-forced prompt positions"
+      },
+      "tail": {
+        "position": 8191,
+        "total_ms": 479.949,
+        "legacy_total_ms": 574.972,
+        "phase_ms": {
+          "prepare": 14.349,
+          "transformer": 433.119,
+          "kv": 10.221,
+          "head": 21.248,
+          "argmax": 1.011
+        },
+        "note": "same caveat as ctx4096; attention spans the full 8192-entry window"
+      },
+      "gate_record": "release/contexts/ctx8192.qualification.json",
+      "evidence": {
+        "in_repo": false,
+        "source_record": "MINICPM5_CONTEXT8192_QUALIFICATION.json",
+        "source_sha256": "14cd2620a3c0dfaf48692f6a2ec2684745611e1693c635dcae549f643a91739b",
+        "files": [
+          {
+            "path": "p24c8192_agent_stock/board_zero_once_v2_352_16.json",
+            "sha256": "e6c14f285c128c51ac9ca9a627f3fe60abd1012423e254dcc9e9829a92c2ca89",
+            "provides": "adopted-mode steady-state and position-zero phase records"
+          },
+          {
+            "path": "p24c8192_agent_stock/board_zero_once_v2_352_oracle3.json",
+            "sha256": "053b79df5caed8faae6cfd57cebc5e0cbef4a021efd1c565df9f1a6892e674c2",
+            "provides": "pooled 3-prompt oracle timing for the adopted mode"
+          },
+          {
+            "path": "p24c8192_agent_stock/board_zero_once_v2_352_pos8191.json",
+            "sha256": "60fc8e0a6563e4aa7b5611c24bb3a3b954fb0c4b460cc16590b151c82101c2bc",
+            "provides": "the last-valid-position single-step record"
+          },
+          {
+            "path": "p24c8192_agent_stock/board_pos8191.json",
+            "sha256": "73d20576800ce86e2d9e0903779100f8eb6ea963c412e3028042df7b13dc5c19",
+            "provides": "the legacy-mode last-position record"
+          }
+        ]
+      }
+    }
+  ],
+  "executor_mode_ab": {
+    "context": 8192,
+    "workload": "one 2-token prompt, 16 generated tokens, identical token ids across every mode",
+    "token_identity": "all five modes produced byte-identical position-1 raw outputs and the same 16 generated token ids, so this table compares cost only",
+    "modes": [
+      {
+        "mode": "cached",
+        "total_p50_ms": 219.303,
+        "tokens_per_second": 4.56,
+        "phase_p50_ms": {"prepare": 3.004, "transformer": 194.536, "kv": 0.432, "head": 20.392, "argmax": 1.004},
+        "verdict": "baseline",
+        "note": "every handle memory-cached; slow legacy transformer path",
+        "evidence_sha256": "7221a1464e41a16e6d4ea70e6229aee91d25971b03c9468b844c507f5345f24c"
+      },
+      {
+        "mode": "nocache",
+        "total_p50_ms": 222.344,
+        "tokens_per_second": 4.5,
+        "phase_p50_ms": {"prepare": 2.864, "transformer": 171.247, "kv": 2.678, "head": 20.388, "argmax": 25.214},
+        "verdict": "rejected",
+        "note": "uncaching speeds the transformer by 23 ms but costs 24 ms in argmax; net slowest",
+        "evidence_sha256": "bfbb8f4cc392606b972dcceeeea762ac90aa52acb471111c76e20fb2d5f773c1"
+      },
+      {
+        "mode": "per-model-mixed",
+        "total_p50_ms": 198.567,
+        "tokens_per_second": 5.036,
+        "phase_p50_ms": {"prepare": 2.944, "transformer": 171.303, "kv": 2.689, "head": 20.665, "argmax": 0.996},
+        "verdict": "superseded",
+        "note": "uncached transformer with a cached argmax handle; isolates that the nocache penalty was entirely in argmax",
+        "evidence_sha256": "e46b6c52216618f4aed4783bdc643d88e80c164da119f47cfe7da6ab2573684b"
+      },
+      {
+        "mode": "zero-once",
+        "total_p50_ms": 167.113,
+        "tokens_per_second": 5.984,
+        "phase_p50_ms": {"prepare": 2.929, "transformer": 139.851, "kv": 2.694, "head": 20.666, "argmax": 0.989},
+        "verdict": "adopted",
+        "note": "v2_352 zero-once executor candidate; 23.8% faster than the cached baseline",
+        "evidence_sha256": "e6c14f285c128c51ac9ca9a627f3fe60abd1012423e254dcc9e9829a92c2ca89"
+      },
+      {
+        "mode": "promptskip+zero-once",
+        "total_p50_ms": 167.282,
+        "tokens_per_second": 5.978,
+        "phase_p50_ms": {"prepare": 2.93, "transformer": 139.865, "kv": 2.694, "head": 20.666, "argmax": 0.989},
+        "verdict": "adopted",
+        "note": "steady state is unchanged by design; the gain is at prompt positions only, where the head and argmax are skipped (109.093 -> 87.849 ms at position 0)",
+        "evidence_sha256": "5ab6b15bdfc57f2d973655b16ed1abd2eb2138323e7828a552d12fad8cfc76fb"
+      }
+    ]
+  },
+  "gate_binding": {
+    "policy": "a performance number is publishable only alongside the numeric gate that the same artifact passed; throughput never substitutes for a cosine or token gate",
+    "entries": [
+      {
+        "profile": "ctx1024",
+        "gate_record": "release/v0.1.0/qualification.json",
+        "decode_om_sha256": "59d6bfc9f66edbacc90896f723320041fc6c352d85306054e090b13ecaf774b1",
+        "prefill_om_sha256": "fea09d294513839ccab846050193def475859f4352e2cb3fad7c2f8f1dfa4536",
+        "gate_verdict": "PASS",
+        "minimum_public_output": 0.9966460425468881
+      },
+      {
+        "profile": "ctx4096",
+        "gate_record": "release/contexts/ctx4096.qualification.json",
+        "decode_om_sha256": "9f456c6b5d716fc97d9be936767e0464eb9868ab3abcd172163139c7bd05254e",
+        "prefill_om_sha256": "fea09d294513839ccab846050193def475859f4352e2cb3fad7c2f8f1dfa4536",
+        "gate_verdict": "PASS",
+        "minimum_public_output": 0.9908199813
+      },
+      {
+        "profile": "ctx8192",
+        "gate_record": "release/contexts/ctx8192.qualification.json",
+        "decode_om_sha256": "1c1c345deddf64e3af3b3c89bee07aba65035620d9e08d69b11b6c9aeb233c3d",
+        "prefill_om_sha256": "fea09d294513839ccab846050193def475859f4352e2cb3fad7c2f8f1dfa4536",
+        "gate_verdict": "CANDIDATE_STRICT_EOS_FAIL",
+        "minimum_public_output": 0.9860760661
+      }
+    ]
+  },
+  "not_measured": [
+    "per-layer or per-kernel NPU breakdown: only the five host-observed phases exist",
+    "KV snapshot hydration bytes and time at the tail positions: no such field is recorded",
+    "separation of first-step warm-up from tail-position cost: the tail runs execute exactly one step",
+    "ctx128: no board performance run exists",
+    "executor-mode A/B at ctx1024 or ctx4096: the five-mode comparison was run at ctx8192 only",
+    "prompts longer than the prefill window under the mixed contract: every recorded run used 2-13 token prompts"
+  ]
+}

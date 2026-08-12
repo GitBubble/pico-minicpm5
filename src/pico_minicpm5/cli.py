@@ -15,6 +15,11 @@ from .compiler.fake import FakeCompiler
 from .contract import HF_REVISION, verify_checkpoint
 from .hub import fetch_checkpoint
 from .pipeline import build_three_handle
+from .prefill_blocks import (
+    qualify_file as qualify_prefill_block_file,
+    qualify_release_file as qualify_prefill_block_release_file,
+    qualify_strict_s1_release_file as qualify_prefill_s1_release_file,
+)
 from .qualification import build_qualification
 from .reference import DEFAULT_PROMPT_TOKENS, capture_reference
 from .release.bundle import assemble_bundle, verify_bundle
@@ -156,6 +161,28 @@ def _qualification_command(subparsers) -> None:
     command.add_argument("--out", type=Path, required=True)
 
 
+def _prefill_block_qualification_command(subparsers) -> None:
+    command = subparsers.add_parser(
+        "qualify-prefill-block",
+        help=("validate development-only native block evidence (v2; not "
+              "release activatable)"),
+    )
+    command.add_argument("--evidence", type=Path, required=True)
+    command.add_argument("--out", type=Path, required=True)
+    release = subparsers.add_parser(
+        "qualify-prefill-block-release",
+        help="validate content-bound native block evidence for release v4",
+    )
+    release.add_argument("--evidence", type=Path, required=True)
+    release.add_argument("--out", type=Path, required=True)
+    strict_s1 = subparsers.add_parser(
+        "qualify-prefill-s1-release",
+        help="validate the content-bound strict-S1 release baseline",
+    )
+    strict_s1.add_argument("--evidence", type=Path, required=True)
+    strict_s1.add_argument("--out", type=Path, required=True)
+
+
 def _capture_command(subparsers) -> None:
     command = subparsers.add_parser(
         "capture", help="record hashes from one completed simulator or board execution"
@@ -207,6 +234,7 @@ def build_parser() -> argparse.ArgumentParser:
     head_score.add_argument("--report", type=Path, required=True)
     _capture_command(subparsers)
     _qualification_command(subparsers)
+    _prefill_block_qualification_command(subparsers)
     _release_commands(subparsers)
     return parser
 
@@ -364,6 +392,18 @@ def main(argv=None) -> int:
         )
         _emit(report)
         return 0 if report["verdict"]["overall"] == "PASS" else 1
+    if args.command == "qualify-prefill-block":
+        _emit(qualify_prefill_block_file(
+            evidence=args.evidence, output=args.out))
+        return 0
+    if args.command == "qualify-prefill-block-release":
+        _emit(qualify_prefill_block_release_file(
+            evidence=args.evidence, output=args.out))
+        return 0
+    if args.command == "qualify-prefill-s1-release":
+        _emit(qualify_prefill_s1_release_file(
+            evidence=args.evidence, output=args.out))
+        return 0
     if args.command == "release":
         if args.release_command == "assemble":
             _emit(assemble_bundle(models=args.models, model_dir=args.model_dir,

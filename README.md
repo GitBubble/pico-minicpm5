@@ -121,6 +121,21 @@ separate applications. For a one-shot completion use
 The explicit `--prompt` and `--interactive` options retain the legacy raw-text
 completion mode for compatibility.
 
+## Direct use and OpenClaw preview
+
+The current `v0.1.0` release is fixed at `ctx1024` and does **not** meet
+OpenClaw's 4096-token local-model floor. It must not be advertised as an
+OpenClaw-ready bundle. Users who have a separately deployed compatible service
+can follow the detailed Chinese guide. The only currently documented native
+JSONL path is the non-production C4096 split-runner preview; C8192 native OM to
+OpenClaw is not yet closed:
+
+- [MiniCPM5 服务接入 OpenClaw：普通用户使用指南（预览；当前无公开 OpenClaw-ready Asset）](docs/OPENCLAW_USAGE.zh-CN.md)
+
+The guide starts with the safe text-only path, uses an isolated OpenClaw
+profile, keeps the unauthenticated model endpoint on loopback, and records the
+remaining native-OM and tool-call release blockers explicitly.
+
 ## Quick start
 
 ```bash

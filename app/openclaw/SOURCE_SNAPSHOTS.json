@@ -1,0 +1,27 @@
+{
+  "schema": "pico.minicpm5.openclaw-source-snapshots.v1",
+  "license": "Apache-2.0",
+  "files": {
+    "src/merged_board_server.py": {
+      "sha256": "1cd0ce4acd223c66ab2736bbf7b8bbc257f29f88a21a68ddcbca02085b1a73b4"
+    },
+    "src/merged_jsonl_runner.py": {
+      "sha256": "1e17f6fecbd9d5458aedf1bccfd64a853ae7bfad5399b6645428f19b51284948"
+    },
+    "src/pico_minicpm5_split_board_runner.py": {
+      "sha256": "8bb1266c89cec85c9f969a1f8fb832e084ab3636221a2c0214b607e10fa85a82"
+    },
+    "src/probe_om_execute_latency.py": {
+      "sha256": "142a9e1bc90b4d4ac6380e48ba651d63d1d233797fff02a65407448c2db6853b"
+    },
+    "src/qualify_minicpm_greedy_chain.py": {
+      "sha256": "6d2b134f536932d34cb5b1b28ab1009690a91d48deb477d072962db6126a852a"
+    },
+    "src/config_generator.py": {
+      "sha256": "96cdd42d126a305949af710fa452e10abc6fd429d34ac61801a18cccd3effff0"
+    },
+    "src/openai_service.py": {
+      "sha256": "52b49567be39ebe859ce3dffd6d954fd7e4056c7c4619e380f4ab97934ec4297"
+    }
+  }
+}

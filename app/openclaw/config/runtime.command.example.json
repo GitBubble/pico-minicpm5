@@ -1,0 +1,43 @@
+{
+  "schema": "pico.minicpm5.openclaw-runtime.v1",
+  "tokenizer_json": "/opt/pico-minicpm5/assets/tokenizer.json",
+  "chat_template": "/opt/pico-minicpm5/assets/chat_template.jinja",
+  "context_window": 8192,
+  "max_tokens": 128,
+  "host": "127.0.0.1",
+  "port": 8000,
+  "enable_tools": false,
+  "runner": {
+    "command": [
+      "/opt/pico-minicpm5/app/openclaw/.venv/bin/python",
+      "/opt/pico-minicpm5/app/openclaw/src/merged_jsonl_runner.py",
+      "--serve-jsonl",
+      "--runtime-module",
+      "/opt/pico-minicpm5/app/openclaw/src/merged_board_server.py",
+      "--python-path",
+      "/opt/pico-minicpm5/app/openclaw/src",
+      "--persistent-executor",
+      "/opt/pico-minicpm5/bin/pico_persistent_acl_executor.zero_once.v2_352.aarch64",
+      "--decode-model",
+      "/opt/pico-minicpm5/models/decode.ctx8192.om",
+      "--prefill-model",
+      "/opt/pico-minicpm5/models/prefill.ctx1024.om",
+      "--head-model",
+      "/opt/pico-minicpm5/models/head.om",
+      "--library-path",
+      "/root/pico_default_smoke/lib",
+      "--library-path",
+      "/opt/lib/npu",
+      "--embedding",
+      "/opt/pico-minicpm5/assets/token_embedding.f16.bin",
+      "--context",
+      "8192",
+      "--max-new-limit",
+      "128",
+      "--timeout",
+      "3600",
+      "--decode-no-cache",
+      "--characterize-decode-workspace-zero-once"
+    ]
+  }
+}

@@ -90,6 +90,18 @@ tar cf - . | ssh root@BOARD_IP \
 并将其 C 源码和 Makefile 统一归档在 `app/native/`。这些文件不再作为
 独立 Release Asset 重复发布。
 
+## 直接使用与 OpenClaw 预览
+
+当前 `v0.1.0` 发行固定为 `ctx1024`，**不**满足 OpenClaw 对本地模型 4096 token
+上下文下限的要求，不得宣传为 OpenClaw-ready 发行包。已经另行部署了兼容服务的
+用户可以参考详细中文指南。当前唯一成文的 native JSONL 路径是非生产的 C4096
+split-runner 开发预览；C8192 native OM 到 OpenClaw 的链路尚未闭环：
+
+- [MiniCPM5 服务接入 OpenClaw：普通用户使用指南（预览；当前无公开 OpenClaw-ready Asset）](docs/OPENCLAW_USAGE.zh-CN.md)
+
+指南从安全的纯文字路径开始，使用隔离的 OpenClaw profile，把未鉴权的模型端点
+保持在回环地址，并明确记录剩余的 native-OM 与工具调用发布阻塞项。
+
 ## 从源码构建
 
 ```bash

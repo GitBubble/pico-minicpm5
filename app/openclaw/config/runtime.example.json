@@ -1,0 +1,13 @@
+{
+  "schema": "pico.minicpm5.openclaw-runtime.v1",
+  "tokenizer_json": "/opt/pico-minicpm5/assets/tokenizer.json",
+  "chat_template": "/opt/pico-minicpm5/assets/chat_template.jinja",
+  "context_window": 8192,
+  "max_tokens": 128,
+  "host": "127.0.0.1",
+  "port": 8000,
+  "enable_tools": false,
+  "runner": {
+    "socket": "/run/pico-minicpm5/runner.sock"
+  }
+}

@@ -73,7 +73,9 @@ ExtendRMSNorm → q/k/v projections → matrix RoPE → KV append
 ```
 
 Norm gamma is folded into following projections. Layer zero uses the qualified
-pre-scale. Family-specific Clip nodes pin the activation-range contract.
+pre-scale. Family-specific Clip nodes pin the activation-range contract; see
+[the quantization contract](QUANTIZATION_CONTRACT.md) for how those bounds cap
+ATC's IFMR range search and why the two families cannot be merged.
 
 ## 5. Compose 24 layers
 

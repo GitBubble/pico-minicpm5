@@ -307,7 +307,10 @@ See [docs/PIPELINE.md](docs/PIPELINE.md),
 [Agent routing and runtime-context profile design](docs/AGENT_ROUTING_AND_CONTEXT_PROFILES.md)
 defines hybrid routing and the ctx128/1024/4096/8192 capability matrix; the
 [native prefill scheduler](docs/NATIVE_PREFILL_SCHEDULER.md) defines the
-`S128 -> S32 -> S16 -> S1` TTFT path and its activation gates.
+`S128 -> S32 -> S16 -> S1` TTFT path and its activation gates. The
+[quantization contract](docs/QUANTIZATION_CONTRACT.md) records how ATC's IFMR
+search and the in-graph `Clip` bounds combine (`min(inferred, clip)`), and why
+position zero needs its own calibration family.
 
 ## Development
 

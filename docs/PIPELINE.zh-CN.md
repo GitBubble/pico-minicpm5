@@ -50,6 +50,10 @@ pico-minicpm5 onnx export-head \
 投影、RoPE、KV append、GQA attention、SwiGLU MLP 与 residual。head 为最终
 RMSNorm 加词表投影。随机权重 fixture 只能用于前端测试，不能生成 Release。
 
+族特定的 Clip 节点钉住激活量程合同；这些边界如何以 `min(推断值, Clip 边界)`
+封顶 ATC 的 IFMR 量程搜索、以及两个 family 为何不能合并，见
+[量化契约](QUANTIZATION_CONTRACT.zh-CN.md)。
+
 ## 5. 组合 24 层
 
 ```bash

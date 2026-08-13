@@ -133,6 +133,7 @@ data、OM、token embedding、ATC/DDK/libinstsim、SDK 动态库和私有板端�
 
 - [Agent 路由与运行时 Context Profile 设计](docs/AGENT_ROUTING_AND_CONTEXT_PROFILES.zh-CN.md)
 - [Native 多 Token Prefill 调度合同](docs/NATIVE_PREFILL_SCHEDULER.zh-CN.md)
+- [量化契约](docs/QUANTIZATION_CONTRACT.zh-CN.md)
 - [端到端流水线](docs/PIPELINE.zh-CN.md)
 - [OM 图级组合合同](docs/OM_COMPOSITION.zh-CN.md)
 - [验证阶梯](docs/VALIDATION.zh-CN.md)

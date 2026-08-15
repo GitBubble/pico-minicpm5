@@ -17,7 +17,7 @@
       "--python-path",
       "/opt/pico-minicpm5/app/openclaw/src",
       "--persistent-executor",
-      "/opt/pico-minicpm5/bin/pico_persistent_acl_executor.zero_once.v2_352.aarch64",
+      "/opt/pico-minicpm5/bin/pico_persistent_acl_executor.retain_input.v1.aarch64",
       "--decode-model",
       "/opt/pico-minicpm5/models/decode.ctx8192.om",
       "--prefill-model",

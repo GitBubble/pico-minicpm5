@@ -123,6 +123,23 @@
  * Opcodes 1 and 2 are untouched and stay wire-compatible, so an older caller
  * keeps working against this binary byte for byte.
  *
+ * Per-model cacheability (--no-cache-model N, ported 2026-08-15 from the
+ * zero-once lineage executor):
+ *   The default allocates every buffer of every model with
+ *   svp_acl_rt_malloc_cached and performs the full flush/invalidate protocol
+ *   around each execute.  --no-cache-model N (repeatable) allocates model N's
+ *   OM image and its whole IO dataset with plain svp_acl_rt_malloc instead and
+ *   skips every cache-maintenance call that names one of that model's buffers:
+ *   the pre-execute input flush, the output-zero flush, the post-execute
+ *   output invalidate, the argmax re-invalidate, chain-write / scatter / copy
+ *   source invalidates and destination flushes, and snapshot-restore flushes.
+ *   Models NOT named keep the cached protocol untouched, so a C8192 decode
+ *   model can run uncached while the head stays cached and its argmax scan
+ *   keeps cacheable-read speed.  N must name a loaded --model slot.
+ *   --no-cache-model composes with --retain-input on the same model: retention
+ *   only suppresses re-zeroing of the named workspace tail, which is
+ *   independent of how the buffer was allocated.
+ *
  * Execute response (executor -> caller):
  *   u32 "PES1", u16 version, u16 status, u32 model_index,
  *   u32 output_count, u32 error_bytes, u32 reserved,
@@ -251,15 +268,45 @@ static void copy_input_bytes(unsigned char *destination,
         memcpy(destination, source, length);
 }
 
-#ifndef PICO_PERSISTENT_ACL_CONTRACT_ONLY
+/* Retained-input policy (candidate, 2026-08-15).
+ *
+ * The default path re-zeroes every input buffer at or beyond the declared
+ * public prefix before every execute, and in cached mode also flushes the
+ * whole input dataset.  For the deployed MiniCPM5 ctx1024 handles the tail is
+ * an ATC-synthesized 25,837,568-byte workspace that no host path ever writes,
+ * so both passes are host time spent restoring a value the host cannot have
+ * changed.  --retain-input names one such buffer and asserts the single
+ * invariant that makes both passes redundant:
+ *
+ *   THE HOST NEVER WRITES A RETAINED INPUT AFTER ALLOCATION.
+ *
+ * malloc_svp() zero-fills and flushes it once at load.  Every host write path
+ * (opcodes 3, 4-embedded, 6, 7, 8, 9) refuses a retained target.  A retained
+ * model additionally refuses any execute whose declared public prefix is not
+ * the exact prefix bound at startup, so a caller that declares fewer inputs is
+ * rejected instead of being silently served a workspace it believes is zero.
+ * Any internal failure in the execute pipeline poisons the model, because
+ * after a partial reset the retained buffer's provenance is no longer known.
+ */
+#define MAX_RETAIN_SPECS 16u
+
+typedef struct {
+    int model;
+    int input;
+    int prefix;
+    uint64_t bytes;
+} retain_spec;
+
 typedef struct {
     const char *model_paths[MAX_MODELS];
+    unsigned char no_cache_models[MAX_MODELS];
     size_t model_count;
     const char *acl_config;
     int device_id;
     int cached;
+    retain_spec retains[MAX_RETAIN_SPECS];
+    size_t retain_count;
 } executor_options;
-#endif
 
 static void put_u16(unsigned char *out, uint16_t value)
 {
@@ -398,13 +445,53 @@ static int read_u64_fd(int fd, uint64_t *value)
     return 0;
 }
 
+#endif
+
 static void usage(const char *program)
 {
     fprintf(stderr,
             "Usage: %s --model MODEL.om [--model MODEL.om ...] "
-            "[--device N] [--acl-config PATH] [--no-cache]\n",
+            "[--device N] [--acl-config PATH] [--no-cache] "
+            "[--no-cache-model INDEX] "
+            "[--retain-input MODEL:INPUT:PUBLIC_PREFIX:BYTES]\n",
             program);
 }
+
+/* MODEL:INPUT:PUBLIC_PREFIX:BYTES.  BYTES is asserted against the live ACL
+ * descriptor rather than trusted, because the same container reports a
+ * different control-input size under libinstsim than on the board. */
+static int parse_retain_spec(const char *text, retain_spec *spec)
+{
+    unsigned long long values[4];
+    size_t field;
+    const char *cursor = text;
+    for (field = 0; field < 4; field++) {
+        char *end = NULL;
+        errno = 0;
+        values[field] = strtoull(cursor, &end, 10);
+        if (errno != 0 || end == cursor) return -1;
+        if (field < 3) {
+            if (*end != ':') return -1;
+            cursor = end + 1;
+        } else if (*end != '\0') {
+            return -1;
+        }
+    }
+    if (values[0] >= MAX_MODELS || values[1] >= MAX_MODEL_IO ||
+        values[2] > MAX_MODEL_IO || values[3] == 0 ||
+        values[3] > MAX_TENSOR_BYTES) {
+        return -1;
+    }
+    /* A public input is part of the caller's contract and can never be
+     * retained: only the descriptor tail is eligible. */
+    if (values[1] < values[2]) return -1;
+    spec->model = (int)values[0];
+    spec->input = (int)values[1];
+    spec->prefix = (int)values[2];
+    spec->bytes = (uint64_t)values[3];
+    return 0;
+}
+
 
 static int parse_nonnegative_int(const char *text, int *value)
 {
@@ -423,6 +510,7 @@ static int parse_nonnegative_int(const char *text, int *value)
 static int parse_args(int argc, char **argv, executor_options *options)
 {
     int index;
+    size_t model_index;
     memset(options, 0, sizeof(*options));
     options->cached = 1;
     for (index = 1; index < argc; index++) {
@@ -438,6 +526,19 @@ static int parse_args(int argc, char **argv, executor_options *options)
             options->acl_config = argv[++index];
         } else if (strcmp(argv[index], "--no-cache") == 0) {
             options->cached = 0;
+        } else if (strcmp(argv[index], "--no-cache-model") == 0 &&
+                   index + 1 < argc) {
+            int selected;
+            if (parse_nonnegative_int(argv[++index], &selected) != 0 ||
+                selected >= (int)MAX_MODELS) return -1;
+            options->no_cache_models[selected] = 1;
+        } else if (strcmp(argv[index], "--retain-input") == 0 &&
+                   index + 1 < argc) {
+            if (options->retain_count >= MAX_RETAIN_SPECS) return -1;
+            if (parse_retain_spec(argv[++index],
+                                  &options->retains[options->retain_count])
+                    != 0) return -1;
+            options->retain_count++;
         } else if (strcmp(argv[index], "--help") == 0 ||
                    strcmp(argv[index], "-h") == 0) {
             usage(argv[0]);
@@ -446,10 +547,14 @@ static int parse_args(int argc, char **argv, executor_options *options)
             return -1;
         }
     }
-    return options->model_count == 0 ? -1 : 0;
+    if (options->model_count == 0) return -1;
+    /* Every --no-cache-model must name a loaded --model slot. */
+    for (model_index = options->model_count;
+         model_index < MAX_MODELS; model_index++) {
+        if (options->no_cache_models[model_index]) return -1;
+    }
+    return 0;
 }
-
-#endif
 
 #ifdef PICO_PERSISTENT_ACL_CONTRACT_ONLY
 
@@ -474,6 +579,27 @@ int main(void)
     uint64_t scatter_row_bytes = 0;
     uint64_t scatter_final_end = 0;
     int all_valid;
+    executor_options options;
+    char *default_args[] = {
+        "executor", "--model", "decode.om", "--model", "head.om"};
+    char *per_model_args[] = {
+        "executor", "--no-cache-model", "0",
+        "--model", "decode.om", "--model", "head.om"};
+    char *repeat_args[] = {
+        "executor", "--no-cache-model", "0", "--no-cache-model", "1",
+        "--model", "decode.om", "--model", "head.om"};
+    char *out_of_table_args[] = {
+        "executor", "--no-cache-model", "1", "--model", "decode.om"};
+    char *out_of_limit_args[] = {
+        "executor", "--no-cache-model", "128", "--model", "decode.om"};
+    char *not_a_number_args[] = {
+        "executor", "--no-cache-model", "abc", "--model", "decode.om"};
+    char *retain_compose_args[] = {
+        "executor", "--no-cache-model", "0",
+        "--retain-input", "0:6:5:206127104", "--model", "decode.om"};
+    char *global_and_model_args[] = {
+        "executor", "--no-cache", "--no-cache-model", "0",
+        "--model", "decode.om"};
     const uint64_t probe = UINT64_C(0xfedcba9876543210);
     put_u64(bytes, probe);
     if (get_u64(bytes) != probe) return 1;
@@ -540,6 +666,24 @@ int main(void)
     }
     if (memcmp(atomic_scatter_destination, atomic_scatter_before,
                sizeof(atomic_scatter_destination)) != 0) return 1;
+    /* --no-cache-model parse contract (ported per-model cacheability). */
+    if (parse_args(5, default_args, &options) != 0 || !options.cached ||
+        options.no_cache_models[0] || options.no_cache_models[1] ||
+        options.retain_count != 0) return 1;
+    if (parse_args(7, per_model_args, &options) != 0 || !options.cached ||
+        !options.no_cache_models[0] || options.no_cache_models[1]) return 1;
+    if (parse_args(9, repeat_args, &options) != 0 ||
+        !options.no_cache_models[0] || !options.no_cache_models[1]) return 1;
+    if (parse_args(5, out_of_table_args, &options) == 0 ||
+        parse_args(5, out_of_limit_args, &options) == 0 ||
+        parse_args(5, not_a_number_args, &options) == 0) return 1;
+    if (parse_args(7, retain_compose_args, &options) != 0 ||
+        !options.no_cache_models[0] || options.retain_count != 1 ||
+        options.retains[0].model != 0 || options.retains[0].input != 6 ||
+        options.retains[0].prefix != 5 ||
+        options.retains[0].bytes != UINT64_C(206127104)) return 1;
+    if (parse_args(6, global_and_model_args, &options) != 0 ||
+        options.cached || !options.no_cache_models[0]) return 1;
     printf("{\"schema\":\"pico.persistent_acl_executor.protocol.v1\","
            "\"byte_order\":\"little\",\"model_limit\":%u,"
            "\"io_limit\":%u,\"resident_scatter_f32_to_f16\":true,"
@@ -553,6 +697,7 @@ int main(void)
            "\"resident_input_copy_opcode\":%u,"
            "\"resident_input_copy_record_bytes\":%u,"
            "\"resident_input_copy_generation_guard\":false,"
+           "\"per_model_no_cache\":true,"
            "\"self_test\":true,"
            "\"model_execution\":false}\n",
            MAX_MODELS, MAX_MODEL_IO, SCATTER_F32_TO_F16_RECORD_BYTES,
@@ -584,8 +729,16 @@ typedef struct {
     svp_acl_mdl_dataset *outputs;
     size_t input_count;
     size_t output_count;
+    /* Nonzero when this model's OM image and IO datasets were allocated
+     * cached; every cache-maintenance call is conditional on it. */
+    int cached;
     size_t input_sizes[MAX_MODEL_IO];
     size_t output_sizes[MAX_MODEL_IO];
+    /* Retained-input policy state; all zero on the default path. */
+    unsigned char retained_input[MAX_MODEL_IO];
+    int has_retained;
+    size_t retained_prefix;
+    int retained_poisoned;
 } persistent_model;
 
 typedef struct {
@@ -783,6 +936,7 @@ static int load_model(persistent_model *model, const char *path, int cached)
     svp_acl_error result;
     memset(model, 0, sizeof(*model));
     model->path = path;
+    model->cached = cached;
     if (load_om_source(path, cached, &model->om_memory, &model->om_size) != 0)
         goto fail;
     result = svp_acl_mdl_load_from_mem(model->om_memory, model->om_size,
@@ -823,14 +977,19 @@ fail:
     return -1;
 }
 
-static int sync_dataset(svp_acl_mdl_dataset *dataset, int invalidate)
+/* skip is either NULL or a MAX_MODEL_IO mask of retained buffers.  A retained
+ * buffer is never written by the host after malloc_svp() flushed its zero
+ * fill, so it can hold no dirty host line and the maintenance is redundant. */
+static int sync_dataset(svp_acl_mdl_dataset *dataset, int invalidate,
+                        const unsigned char *skip)
 {
     size_t index;
     if (dataset == NULL) return -1;
     size_t count = svp_acl_mdl_get_dataset_num_buffers(dataset);
     for (index = 0; index < count; index++) {
-        svp_acl_data_buffer *buffer =
-            svp_acl_mdl_get_dataset_buffer(dataset, index);
+        svp_acl_data_buffer *buffer;
+        if (skip != NULL && index < MAX_MODEL_IO && skip[index]) continue;
+        buffer = svp_acl_mdl_get_dataset_buffer(dataset, index);
         if (buffer == NULL) return -1;
         void *address = svp_acl_get_data_buffer_addr(buffer);
         size_t size = svp_acl_get_data_buffer_size(buffer);
@@ -849,7 +1008,7 @@ static int sync_dataset(svp_acl_mdl_dataset *dataset, int invalidate)
  * that baseline before every persistent execute so prior invocations cannot
  * leak stale workspace or padding into the next segment. */
 static int zero_dataset_range(svp_acl_mdl_dataset *dataset, size_t begin,
-                              int flush_cached)
+                              int flush_cached, const unsigned char *skip)
 {
     size_t index;
     size_t count;
@@ -857,10 +1016,11 @@ static int zero_dataset_range(svp_acl_mdl_dataset *dataset, size_t begin,
     count = svp_acl_mdl_get_dataset_num_buffers(dataset);
     if (begin > count) return -1;
     for (index = begin; index < count; index++) {
-        svp_acl_data_buffer *buffer =
-            svp_acl_mdl_get_dataset_buffer(dataset, index);
+        svp_acl_data_buffer *buffer;
         void *address;
         size_t size;
+        if (skip != NULL && index < MAX_MODEL_IO && skip[index]) continue;
+        buffer = svp_acl_mdl_get_dataset_buffer(dataset, index);
         if (buffer == NULL) return -1;
         address = svp_acl_get_data_buffer_addr(buffer);
         size = svp_acl_get_data_buffer_size(buffer);
@@ -871,6 +1031,63 @@ static int zero_dataset_range(svp_acl_mdl_dataset *dataset, size_t begin,
             return -1;
         }
     }
+    return 0;
+}
+
+static int input_is_retained(const persistent_model *model,
+                             uint32_t input_index)
+{
+    return model != NULL && model->has_retained &&
+        input_index < MAX_MODEL_IO && model->retained_input[input_index] != 0;
+}
+
+/* A retained buffer's provenance is only known while every reset in the
+ * execute pipeline succeeded.  After a partial reset it is not, so refuse
+ * further work on that model until the process restarts. */
+static void poison_retained_model(persistent_model *model)
+{
+    if (model != NULL && model->has_retained) model->retained_poisoned = 1;
+}
+
+/* Bind one parsed spec to a loaded model, fail-closed against the live
+ * descriptor.  Returns 0 on success. */
+static int bind_retain_spec(persistent_model *models, size_t model_count,
+                            const retain_spec *spec, char *error,
+                            size_t error_size)
+{
+    persistent_model *model;
+    if (spec->model < 0 || (size_t)spec->model >= model_count) {
+        snprintf(error, error_size,
+                 "--retain-input names model %d outside the loaded table",
+                 spec->model);
+        return -1;
+    }
+    model = &models[spec->model];
+    if ((size_t)spec->input >= model->input_count ||
+        (size_t)spec->prefix > model->input_count ||
+        (size_t)spec->prefix == 0) {
+        snprintf(error, error_size,
+                 "--retain-input %d:%d:%d exceeds model %d descriptor "
+                 "inputs=%zu", spec->model, spec->input, spec->prefix,
+                 spec->model, model->input_count);
+        return -1;
+    }
+    if (model->input_sizes[spec->input] != (size_t)spec->bytes) {
+        snprintf(error, error_size,
+                 "--retain-input model %d input %d is %zu live bytes, "
+                 "declared %" PRIu64, spec->model, spec->input,
+                 model->input_sizes[spec->input], spec->bytes);
+        return -1;
+    }
+    if (model->has_retained && model->retained_prefix != (size_t)spec->prefix) {
+        snprintf(error, error_size,
+                 "--retain-input model %d declares two public prefixes",
+                 spec->model);
+        return -1;
+    }
+    model->retained_input[spec->input] = 1;
+    model->retained_prefix = (size_t)spec->prefix;
+    model->has_retained = 1;
     return 0;
 }
 
@@ -945,7 +1162,7 @@ static void destroy_snapshot(resident_snapshot *snapshot)
 }
 
 static int serve_request(persistent_model *models, size_t model_count,
-                         int cached, resident_snapshot *snapshots)
+                         resident_snapshot *snapshots)
 {
     unsigned char header[24];
     uint64_t input_sizes[MAX_MODEL_IO] = {0};
@@ -1026,6 +1243,17 @@ static int serve_request(persistent_model *models, size_t model_count,
                 continue;
             }
             byte_count += length;
+            if (model_index < model_count &&
+                input_is_retained(&models[model_index], input_index)) {
+                if (valid) {
+                    valid = 0;
+                    snprintf(error, sizeof(error),
+                             "snapshot range %zu names retained workspace "
+                             "input %u of model %u",
+                             range_index, input_index, model_index);
+                }
+                continue;
+            }
             if (model_index >= model_count ||
                 input_index >= models[model_index].input_count ||
                 offset > models[model_index].input_sizes[input_index] ||
@@ -1128,6 +1356,13 @@ static int serve_request(persistent_model *models, size_t model_count,
              range_index++) {
             resident_snapshot_range *range = &snapshot->ranges[range_index];
             svp_acl_data_buffer *buffer;
+            if (input_is_retained(&models[model_index], range->input_index)) {
+                snprintf(error, sizeof(error),
+                         "snapshot %u restore range %zu names retained "
+                         "workspace input %u", snapshot_id, range_index,
+                         range->input_index);
+                return write_response_header(1, model_index, 0, error);
+            }
             if (range->input_index >= models[model_index].input_count ||
                 range->length == 0 ||
                 range->offset >
@@ -1160,7 +1395,7 @@ static int serve_request(persistent_model *models, size_t model_count,
                    snapshot->bytes + range->data_offset,
                    (size_t)range->length);
         }
-        if (cached) {
+        if (models[model_index].cached) {
             for (range_index = 0; range_index < snapshot->range_count;
                  range_index++) {
                 resident_snapshot_range *range =
@@ -1227,6 +1462,14 @@ static int serve_request(persistent_model *models, size_t model_count,
                         source_model->input_count) {
                     record_valid = 0;
                     record_error = "names an input outside its model";
+                } else if (input_is_retained(
+                               destination_model,
+                               records[record_index].destination_input) ||
+                           input_is_retained(
+                               source_model,
+                               records[record_index].source_input)) {
+                    record_valid = 0;
+                    record_error = "names a retained workspace input";
                 } else if (!input_copy_bounds_valid(
                                records[record_index].destination_offset,
                                destination_model->input_sizes[
@@ -1274,18 +1517,17 @@ static int serve_request(persistent_model *models, size_t model_count,
 
         /* Complete all cached-source synchronization before the first write.
          * A failure here therefore preserves every destination byte. */
-        if (cached) {
-            for (record_index = 0; record_index < record_count;
-                 record_index++) {
-                resident_input_copy *record = &records[record_index];
-                if (svp_acl_rt_mem_invalidate(
-                        (void *)(record->source + record->source_offset),
-                        (size_t)record->length) != SVP_ACL_SUCCESS) {
-                    snprintf(error, sizeof(error),
-                             "input copy record %zu could not invalidate "
-                             "source", record_index);
-                    return write_response_header(2, 0, 0, error);
-                }
+        for (record_index = 0; record_index < record_count;
+             record_index++) {
+            resident_input_copy *record = &records[record_index];
+            if (!models[record->source_model].cached) continue;
+            if (svp_acl_rt_mem_invalidate(
+                    (void *)(record->source + record->source_offset),
+                    (size_t)record->length) != SVP_ACL_SUCCESS) {
+                snprintf(error, sizeof(error),
+                         "input copy record %zu could not invalidate "
+                         "source", record_index);
+                return write_response_header(2, 0, 0, error);
             }
         }
         for (record_index = 0; record_index < record_count; record_index++) {
@@ -1295,18 +1537,17 @@ static int serve_request(persistent_model *models, size_t model_count,
                 record->source + record->source_offset,
                 (size_t)record->length, record->same_buffer);
         }
-        if (cached) {
-            for (record_index = 0; record_index < record_count;
-                 record_index++) {
-                resident_input_copy *record = &records[record_index];
-                if (svp_acl_rt_mem_flush(
-                        record->destination + record->destination_offset,
-                        (size_t)record->length) != SVP_ACL_SUCCESS) {
-                    snprintf(error, sizeof(error),
-                             "input copy record %zu could not flush "
-                             "destination", record_index);
-                    return write_response_header(2, 0, 0, error);
-                }
+        for (record_index = 0; record_index < record_count;
+             record_index++) {
+            resident_input_copy *record = &records[record_index];
+            if (!models[record->destination_model].cached) continue;
+            if (svp_acl_rt_mem_flush(
+                    record->destination + record->destination_offset,
+                    (size_t)record->length) != SVP_ACL_SUCCESS) {
+                snprintf(error, sizeof(error),
+                         "input copy record %zu could not flush "
+                         "destination", record_index);
+                return write_response_header(2, 0, 0, error);
             }
         }
         return write_response_header(0, 0, 0, NULL);
@@ -1338,7 +1579,7 @@ static int serve_request(persistent_model *models, size_t model_count,
         }
         /* The execute path already invalidates outputs, but do it again so a
          * standalone argmax cannot read a line the NPU has superseded. */
-        if (cached && svp_acl_rt_mem_invalidate(
+        if (models[model_index].cached && svp_acl_rt_mem_invalidate(
                 (void *)values,
                 models[model_index].output_sizes[input_count])
                 != SVP_ACL_SUCCESS) {
@@ -1410,6 +1651,10 @@ static int serve_request(persistent_model *models, size_t model_count,
                     scatter->source_output >= source_model->output_count) {
                     record_valid = 0;
                     record_error = "names an input or output outside its model";
+                } else if (input_is_retained(destination_model,
+                                             scatter->destination_input)) {
+                    record_valid = 0;
+                    record_error = "targets a retained workspace input";
                 } else if (!scatter_f32_to_f16_bounds_valid(
                                scatter->destination_base,
                                scatter->destination_stride,
@@ -1459,20 +1704,19 @@ static int serve_request(persistent_model *models, size_t model_count,
 
         /* Phase 2: every cached source becomes CPU-coherent before the first
          * destination byte is changed.  Failure preserves all destinations. */
-        if (cached) {
-            for (record_index = 0; record_index < record_count;
-                 record_index++) {
-                resident_scatter_f32_to_f16 *scatter =
-                    &records[record_index];
-                if (svp_acl_rt_mem_invalidate(
-                        (void *)scatter->source, scatter->source_capacity) !=
-                    SVP_ACL_SUCCESS) {
-                    snprintf(error, sizeof(error),
-                             "scatter record %zu could not invalidate source",
-                             record_index);
-                    return write_response_header(
-                        2, model_index, 0, error);
-                }
+        for (record_index = 0; record_index < record_count;
+             record_index++) {
+            resident_scatter_f32_to_f16 *scatter =
+                &records[record_index];
+            if (!models[scatter->source_model].cached) continue;
+            if (svp_acl_rt_mem_invalidate(
+                    (void *)scatter->source, scatter->source_capacity) !=
+                SVP_ACL_SUCCESS) {
+                snprintf(error, sizeof(error),
+                         "scatter record %zu could not invalidate source",
+                         record_index);
+                return write_response_header(
+                    2, model_index, 0, error);
             }
         }
 
@@ -1490,7 +1734,7 @@ static int serve_request(persistent_model *models, size_t model_count,
          * happened, a flush failure leaves coherence uncertain.  Send the
          * error frame, then terminate this executor session (return -2) so no
          * caller can accidentally continue without reloading all handles. */
-        if (cached) {
+        if (models[model_index].cached) {
             for (record_index = 0; record_index < record_count;
                  record_index++) {
                 resident_scatter_f32_to_f16 *scatter =
@@ -1528,6 +1772,10 @@ static int serve_request(persistent_model *models, size_t model_count,
         } else if (input_count >= models[model_index].input_count) {
             snprintf(error, sizeof(error),
                      "input index %u is out of range for model %u",
+                     input_count, model_index);
+        } else if (input_is_retained(&models[model_index], input_count)) {
+            snprintf(error, sizeof(error),
+                     "input index %u is a retained workspace for model %u",
                      input_count, model_index);
         } else {
             size_t capacity = models[model_index].input_sizes[input_count];
@@ -1594,6 +1842,24 @@ static int serve_request(persistent_model *models, size_t model_count,
                      "public IO prefix exceeds descriptor for model %u",
                      model_index);
         }
+        /* Fail-closed, never fail-open: a retained model serves only the exact
+         * public prefix bound at startup.  A caller that declares fewer inputs
+         * is refused rather than silently handed a retained workspace it
+         * believes the executor re-zeroed. */
+        if (valid && model->has_retained) {
+            if (model->retained_poisoned) {
+                valid = 0;
+                snprintf(error, sizeof(error),
+                         "model %u retained input is poisoned; restart the "
+                         "executor", model_index);
+            } else if ((size_t)input_count != model->retained_prefix) {
+                valid = 0;
+                snprintf(error, sizeof(error),
+                         "model %u retains inputs behind public prefix %zu; "
+                         "request declared %u", model_index,
+                         model->retained_prefix, input_count);
+            }
+        }
     }
     if (model != NULL && opcode == OP_EXECUTE &&
         input_count <= model->input_count) {
@@ -1651,6 +1917,12 @@ static int serve_request(persistent_model *models, size_t model_count,
         if (read_u64_fd(STDIN_FILENO, &length) != 0) return -1;
         if (length > MAX_TENSOR_BYTES) return -1;
         if (flags != WRITE_FLAG_PAYLOAD && flags != WRITE_FLAG_CHAIN) return -1;
+        if (valid && input_is_retained(model, slot)) {
+            valid = 0;
+            snprintf(error, sizeof(error),
+                     "embedded write %zu targets retained workspace input %u "
+                     "of model %u", index, slot, model_index);
+        }
         writable = valid && model != NULL && slot < model->input_count
             && offset <= model->input_sizes[slot]
             && length <= model->input_sizes[slot] - offset;
@@ -1688,7 +1960,7 @@ static int serve_request(persistent_model *models, size_t model_count,
                  * so the hidden state never crosses the pipe.  Invalidate the
                  * producer's buffer first when running cached, otherwise this
                  * can read a stale line the NPU has already superseded. */
-                if (cached && svp_acl_rt_mem_invalidate(
+                if (models[src_model].cached && svp_acl_rt_mem_invalidate(
                         (void *)source,
                         models[src_model].output_sizes[src_output])
                         != SVP_ACL_SUCCESS) {
@@ -1721,29 +1993,38 @@ static int serve_request(persistent_model *models, size_t model_count,
             snprintf(error, sizeof(error), "invalid execute frame");
         return write_response_header(1, model_index, 0, error);
     }
-    if (zero_dataset_range(model->inputs, input_count, 0) != 0) {
-        return write_response_header(2, model_index, 0,
-                                     "internal input reset failed");
-    }
-    if (zero_dataset_range(model->outputs, 0, cached) != 0) {
-        return write_response_header(2, model_index, 0,
-                                     "output reset failed");
-    }
-    if (cached && sync_dataset(model->inputs, 0) != 0) {
-        return write_response_header(2, model_index, 0,
-                                     "input cache flush failed");
+    {
+        const unsigned char *retained =
+            model->has_retained ? model->retained_input : NULL;
+        if (zero_dataset_range(model->inputs, input_count, 0, retained) != 0) {
+            poison_retained_model(model);
+            return write_response_header(2, model_index, 0,
+                                         "internal input reset failed");
+        }
+        if (zero_dataset_range(model->outputs, 0, model->cached, NULL) != 0) {
+            poison_retained_model(model);
+            return write_response_header(2, model_index, 0,
+                                         "output reset failed");
+        }
+        if (model->cached && sync_dataset(model->inputs, 0, retained) != 0) {
+            poison_retained_model(model);
+            return write_response_header(2, model_index, 0,
+                                         "input cache flush failed");
+        }
     }
     {
         svp_acl_error acl_result = svp_acl_mdl_execute(
             model->model_id, model->inputs, model->outputs);
         if (acl_result != SVP_ACL_SUCCESS) {
+            poison_retained_model(model);
             snprintf(error, sizeof(error),
                      "svp_acl_mdl_execute failed ret=%d model=%u",
                      acl_result, model_index);
             return write_response_header(3, model_index, 0, error);
         }
     }
-    if (cached && sync_dataset(model->outputs, 1) != 0) {
+    if (model->cached && sync_dataset(model->outputs, 1, NULL) != 0) {
+        poison_retained_model(model);
         return write_response_header(4, model_index, 0,
                                      "output cache invalidate failed");
     }
@@ -1774,6 +2055,7 @@ int main(int argc, char **argv)
     int exit_code = 1;
     char ready_error[512] = {0};
     uintmax_t total_om_bytes = 0;
+    size_t no_cache_count = 0;
     memset(models, 0, sizeof(models));
     memset(snapshots, 0, sizeof(snapshots));
     if (parse_args(argc, argv, &options) != 0) {
@@ -1804,9 +2086,11 @@ int main(int argc, char **argv)
     }
     device_set = 1;
     for (loaded_count = 0; loaded_count < options.model_count; loaded_count++) {
+        int model_cached = options.cached &&
+            !options.no_cache_models[loaded_count];
         if (load_model(&models[loaded_count],
                        options.model_paths[loaded_count],
-                       options.cached) != 0) {
+                       model_cached) != 0) {
             snprintf(ready_error, sizeof(ready_error),
                      "load model[%zu] failed: %s", loaded_count,
                      options.model_paths[loaded_count]);
@@ -1815,11 +2099,13 @@ int main(int argc, char **argv)
         }
         fprintf(stderr,
                 "persistent_executor.model[%zu]=ready id=%u inputs=%zu "
-                "outputs=%zu bytes=%zu path=%s\n",
+                "outputs=%zu bytes=%zu cached=%d path=%s\n",
                 loaded_count, models[loaded_count].model_id,
                 models[loaded_count].input_count,
                 models[loaded_count].output_count,
-                models[loaded_count].om_size, models[loaded_count].path);
+                models[loaded_count].om_size, models[loaded_count].cached,
+                models[loaded_count].path);
+        if (!models[loaded_count].cached) no_cache_count++;
         if (UINTMAX_MAX - total_om_bytes < models[loaded_count].om_size) {
             snprintf(ready_error, sizeof(ready_error),
                      "resident OM byte total overflow at model[%zu]",
@@ -1830,13 +2116,42 @@ int main(int argc, char **argv)
         }
         total_om_bytes += models[loaded_count].om_size;
     }
+    {
+        size_t retain_index;
+        for (retain_index = 0; retain_index < options.retain_count;
+             retain_index++) {
+            if (bind_retain_spec(models, options.model_count,
+                                 &options.retains[retain_index],
+                                 ready_error, sizeof(ready_error)) != 0) {
+                write_ready(NULL, 0, 1, ready_error);
+                goto cleanup;
+            }
+        }
+        for (retain_index = 0; retain_index < options.model_count;
+             retain_index++) {
+            size_t input_index;
+            uintmax_t retained_bytes = 0;
+            if (!models[retain_index].has_retained) continue;
+            for (input_index = 0; input_index < models[retain_index].input_count;
+                 input_index++) {
+                if (models[retain_index].retained_input[input_index])
+                    retained_bytes += models[retain_index].input_sizes[input_index];
+            }
+            fprintf(stderr,
+                    "persistent_executor.model[%zu].retained public_prefix=%zu "
+                    "bytes=%" PRIuMAX "\n", retain_index,
+                    models[retain_index].retained_prefix, retained_bytes);
+        }
+    }
     if (write_ready(models, options.model_count, 0, NULL) != 0) goto cleanup;
     fprintf(stderr,
-            "persistent_executor=ready models=%zu cached=%d om_bytes=%" PRIuMAX
-            "\n", options.model_count, options.cached, total_om_bytes);
+            "persistent_executor=ready models=%zu cached_default=%d "
+            "no_cache_models=%zu om_bytes=%" PRIuMAX
+            "\n", options.model_count, options.cached, no_cache_count,
+            total_om_bytes);
     for (;;) {
         int serve_result = serve_request(models, options.model_count,
-                                         options.cached, snapshots);
+                                         snapshots);
         if (serve_result == 1) {
             exit_code = 0;
             break;

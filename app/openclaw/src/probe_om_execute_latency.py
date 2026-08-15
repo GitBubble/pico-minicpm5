@@ -32,11 +32,11 @@ def _start(executable: Path, models: Sequence[Path], library_paths: Sequence[Pat
     if extra_executor_args not in (
             (), ("--no-cache",), ("--no-cache-model", "0"),
             ("--no-cache-model", "0",
-             "--characterize-model0-input6-zero-once")):
+             "--retain-input", "0:6:5:206127104")):
         raise ValueError(
             "extra executor arguments must select only the fixed global or "
             "model-0 no-cache policy, optionally with the fixed C8192 "
-            "model0/input6 zero-once characterization")
+            "model0/input6 workspace retention")
     command = [str(executable), "--device", str(device)]
     command.extend(extra_executor_args)
     for model in models:

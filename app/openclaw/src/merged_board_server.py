@@ -196,7 +196,7 @@ class Merged:
         executor_args = (
             ("--no-cache",) if executor_uncached else
             (("--no-cache-model", "0",
-              "--characterize-model0-input6-zero-once")
+              "--retain-input", "0:6:5:206127104")
              if characterize_decode_workspace_zero_once else
              (("--no-cache-model", "0") if decode_no_cache else ())))
         self.process = probe._start(

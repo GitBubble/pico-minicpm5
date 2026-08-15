@@ -128,7 +128,7 @@
       "prefill_window": 1024,
       "status": "pending",
       "contract": "mixed prefill window (position zero on the frozen ctx1024 prefill.om)",
-      "runtime_mode": "resident packed K/V, zero-once v2_352 executor candidate",
+      "runtime_mode": "resident packed K/V, retain-input v1 executor (ELF cef4edb2, supersedes zero-once v2_352; measured parity 167.266 ms / 5.9785 tok/s, binding evidence scratchpad/c8192_retain_ab_20260815/binding/)",
       "gate_reported": {
         "scope": "16-token cache-policy A/B run of the adopted zero-once candidate",
         "total_p50_ms": 167.112812,

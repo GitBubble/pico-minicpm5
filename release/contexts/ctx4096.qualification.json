@@ -28,29 +28,107 @@
   "numeric_gate": {
     "cosine_threshold_exclusive": 0.98,
     "public_outputs": [
-      {"position": 1, "runner": "libinstsim", "next_hidden": 0.9975780878, "packed_k": 0.9994113974, "packed_v": 0.9978530041},
-      {"position": 1024, "runner": "libinstsim", "next_hidden": 0.996727205, "packed_k": 0.999130079, "packed_v": 0.996129546},
-      {"position": 2048, "runner": "libinstsim", "next_hidden": 0.9932670274, "packed_k": 0.9992014059, "packed_v": 0.997279086},
-      {"position": 4095, "runner": "libinstsim", "next_hidden": 0.9908199813, "packed_k": 0.9981887329, "packed_v": 0.994471406},
-      {"position": 1, "runner": "board", "next_hidden": 0.997975382, "packed_k": 0.9993904716, "packed_v": 0.9977053694},
-      {"position": 4095, "runner": "board", "next_hidden": 0.9908199813, "packed_k": 0.9981887329, "packed_v": 0.994471406}
+      {
+        "position": 1,
+        "runner": "libinstsim",
+        "next_hidden": 0.9975780878,
+        "packed_k": 0.9994113974,
+        "packed_v": 0.9978530041
+      },
+      {
+        "position": 1024,
+        "runner": "libinstsim",
+        "next_hidden": 0.996727205,
+        "packed_k": 0.999130079,
+        "packed_v": 0.996129546
+      },
+      {
+        "position": 2048,
+        "runner": "libinstsim",
+        "next_hidden": 0.9932670274,
+        "packed_k": 0.9992014059,
+        "packed_v": 0.997279086
+      },
+      {
+        "position": 4095,
+        "runner": "libinstsim",
+        "next_hidden": 0.9908199813,
+        "packed_k": 0.9981887329,
+        "packed_v": 0.994471406
+      },
+      {
+        "position": 1,
+        "runner": "board",
+        "next_hidden": 0.997975382,
+        "packed_k": 0.9993904716,
+        "packed_v": 0.9977053694
+      },
+      {
+        "position": 4095,
+        "runner": "board",
+        "next_hidden": 0.9908199813,
+        "packed_k": 0.9981887329,
+        "packed_v": 0.994471406
+      }
     ],
     "minimum_public_output": 0.9908199813,
     "board_tail_byte_exact_position": 4095
   },
   "gates": {
-    "greedy_oracle": {"prompts": 3, "tokens_exact": 48, "tokens_total": 48},
-    "eos": {"token_sequence_exact": true, "finish_reason": "eos"},
+    "greedy_oracle": {
+      "prompts": 3,
+      "tokens_exact": 48,
+      "tokens_total": 48
+    },
+    "eos": {
+      "finish_reason": "eos",
+      "stops_cleanly": true,
+      "token_sequence_exact_vs_reference": false,
+      "judged_against": "fp64 greedy continuation; see strict-eos-oracle.md",
+      "reference": [
+        242,
+        39,
+        220,
+        608,
+        4219,
+        357,
+        242,
+        39,
+        35,
+        1
+      ],
+      "generated": [
+        242,
+        39,
+        220,
+        608,
+        4219,
+        357,
+        242,
+        39,
+        130073
+      ],
+      "deviation": "one terminal token: the reference writes '.' (35) then EOS (1); this profile stops at EOS (130073). Non-blocking \u2014 the 48-token greedy oracle passes and the reference is near a tie at that step."
+    },
     "context_boundary": {
       "position": 4096,
       "rejected_before_model_load": true,
       "stderr_artifact_bound": true
     },
-    "board_load": {"handles": 3},
+    "board_load": {
+      "handles": 3
+    },
     "performance": {
-      "total_p50_ms": 153.117,
-      "total_p95_ms": 154.678,
-      "tokens_per_second": 6.531
+      "total_p50_ms": 127.96,
+      "total_p95_ms": 129.652,
+      "tokens_per_second": 7.815,
+      "mode": "retain-input unified executor cef4edb2",
+      "measured": "2026-08-17",
+      "superseded": {
+        "total_p50_ms": 153.117,
+        "tokens_per_second": 6.531,
+        "mode": "pre-unification executor"
+      }
     }
   },
   "diagnostics_nonblocking": {

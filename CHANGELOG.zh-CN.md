@@ -2,29 +2,49 @@
 
 [English](CHANGELOG.md)
 
-## 未发布
+## 0.2.0 - 2026-08-17
 
-### 混合 prefill 窗口合同与扩展 context 数值门 - 2026-08-12
+### 执行器可复现，且每一档都变快了
 
-- Runtime profile 升级到 schema v2，显式声明 `context.prefill_window`。
-  ctx4096 与 ctx8192 把板端早已在跑的混合合同写成正式合同：position 0 用冻结
-  的已资格化 ctx1024 `models/prefill.om` 引导，各 context 的 decode OM 拥有
-  完整上下文，position 0 之后的 prompt token 走 S1/native-prefill 规划器。
-- 板端 server 按 prefill 句柄自己声明的窗口校验描述符（mask 宽度与 K/V cache
-  字节数），混合 profile 下拒绝 host-KV 镜像与动态槽位探测，启动时报告窗口。
-- 新增 `release/contexts/` 资格记录与纯 JSON 校验器
-  （`pico-minicpm5 qualify-context-profile`），沿用冻结 ctx1024 门的形制：
-  全部公开输出严格高于 `0.98`、位置覆盖最后有效位、贪心/EOS/边界/板载判定、
-  以及 decode OM、继承 prefill/head 与源证据的 hash 绑定。
-- ctx4096 翻为 `qualified`：position 4095 最低公开输出 cosine `0.9908`，板端
-  尾部与 libinstsim 逐字节一致，48/48 贪心 token、EOS 与边界 fail-closed 全部
-  PASS（p50 `153.1 ms`，`6.53 token/s`）。
-- ctx8192 保持 `pending`，候选证据如实入库：公开输出过门（最低 `0.9861`），
-  但严格 EOS 序列门 FAIL，标定为 donor 零扩展而非原生，总判定
-  `CANDIDATE_STRICT_EOS_FAIL`。
-- 新增 `app/openclaw/` OpenClaw 适配包与中文使用指南
-  `docs/OPENCLAW_USAGE.zh-CN.md`；v0.1.0/ctx1024 仍低于 OpenClaw 的 4096 token
-  下限，不得作为 OpenClaw-ready 发行。
+- 板端执行器现绑定 `cef4edb2…`，由本仓库源码用受认可的
+  `aarch64-mix210-linux-gcc` 7.3.0 工具链构建，并在写清单之前验证过逐字节一致
+  （`docs/EXECUTOR_BUILD.zh-CN.md`）。`v0.1.0` 钉的那个二进制，其随附源码无法
+  重建。
+- 它在多次 execute 之间保留 workspace 输入而不是反复重写，因此每个 decode 步省下
+  一次完整的 workspace 写入。三档在同一次会话中实测：ctx1024
+  `9.46 → 9.96 tok/s`（+5.2%）、ctx4096 `6.53 → 7.81 tok/s`（+19.7%）、ctx8192
+  `4.59 → 6.03 tok/s`（+31.6%）。48 个贪心 oracle token 与各自已资格化基线
+  逐个一致。
+- 节省与保留的 workspace 成正比——24.6 / 98.3 / 196.6 MiB 对应 5.5 / 27.6 /
+  54.9 ms——三点共线，这才使它成为机理而非巧合。
+- 构成 TTFT 的 prompt 摄入成本现在三档皆有实测：每 prompt token `79.49` /
+  `106.28` / `144.02` ms。ctx1024 的数字与一次独立冷 prefill 实测相差 `0.10%`。
+
+### ctx4096 以混合 prefill 窗口合同转正
+
+- Runtime profile 携带 `context.prefill_window`；ctx4096 与 ctx8192 的 position 0
+  在冻结的 ctx1024 `prefill.om` 上引导，并共享 `head_flat.om`，逐字节相同。直接
+  实测：两者的 position-0 transformer 时间相差 `0.39 ms`。
+- ctx4096 为 `qualified`；ctx8192 因 donor 零扩展标定保持 `pending`，中文 oracle、
+  内存包络与长 prompt 三项仍未闭合。
+
+### 一条量错了东西的门
+
+- ctx8192 一直带着 `eos: FAIL_STRICT_SEQUENCE_MISMATCH`，而它对照的序列从未被
+  追溯到参考模型。用固定 checkpoint 以 float64 重新推导后，参考模型写下一个句号
+  然后停止——这正是 ctx8192 的输出，而 ctx1024 与 ctx4096 并非如此。那条"期望"
+  是从第一个跑出来的工件记录下来的。见 `release/contexts/strict-eos-oracle.md`。
+
+### 文档
+
+- 两个首页上的板端 agent 真实会话录制，自包含动画 SVG：`1.9 ms` 返回的工具调用、
+  一次上下文 rebase、`9.74 tok/s` 的生成。等待段按 `4.5x` 播放且倍率写在画面上，
+  每帧右下角是板子自己的墙钟。
+- `docs/QUANTIZATION_CONTRACT.zh-CN.md`：`Clip` 如何为 ATC 的 IFMR 量程搜索封顶、
+  position 0 为何需要自己的标定 family（是 layer-0 的 MLP 分支而非 attention——
+  attention 那个解释被明确记为已证伪），以及一条因自身证据推翻而撤回的规则。
+- `release/perf/` 新增 TTFT、逐上下文相位拆解、被取代的并轨前数字，以及每项的
+  证据哈希。
 
 ## 0.1.0 - 2026-08-09
 

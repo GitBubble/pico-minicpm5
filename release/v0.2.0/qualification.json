@@ -1,0 +1,196 @@
+{
+  "schema": "pico.minicpm5.merged3handle.qualification.v1",
+  "date": "2026-08-10",
+  "board": "Hi3403 (board address intentionally omitted)",
+  "cosine_threshold_exclusive": 0.98,
+  "artifacts": {
+    "decode": {
+      "bytes": 686997372,
+      "sha256": "59d6bfc9f66edbacc90896f723320041fc6c352d85306054e090b13ecaf774b1"
+    },
+    "prefill": {
+      "bytes": 686999901,
+      "sha256": "fea09d294513839ccab846050193def475859f4352e2cb3fad7c2f8f1dfa4536"
+    },
+    "head_flat": {
+      "bytes": 202651666,
+      "sha256": "fd6675f4aad9d7244471afc637f4964c79a7504b2c73a350985f2d807105330e"
+    }
+  },
+  "runtime_contract": {
+    "handles": 3,
+    "transformer_om_count": 2,
+    "prefill_selection": "position == 0",
+    "decode_selection": "position >= 1",
+    "transformer_runtime_inputs": 7,
+    "transformer_public_inputs": 5,
+    "transformer_outputs": 3
+  },
+  "board_numeric": [
+    {
+      "model": "prefill",
+      "position": 0,
+      "cosine": {
+        "next_hidden": 0.9997042830177014,
+        "k_cur_all": 0.9998121806541973,
+        "v_cur_all": 0.996646042546888,
+        "minimum_public_output": 0.996646042546888
+      },
+      "output_sha256": [
+        "017722e6ec1d0d4ad8b11c854de85b8890bf7712ef69fd45a57bb3dab0fa0cd8",
+        "8a22b5cd5b2ea176091b965a3ec3ae4d799f1969c23a9fa13ce2b32ce0b0f9f2",
+        "19df8056502b9a171159e5af800ca3269d4bafefed74f1442bbfc78a325a841f"
+      ]
+    },
+    {
+      "model": "decode",
+      "position": 1,
+      "cosine": {
+        "next_hidden": 0.9980232292994137,
+        "k_cur_all": 0.9995580491432224,
+        "v_cur_all": 0.9982597339748036,
+        "minimum_public_output": 0.9980232292994137
+      },
+      "output_sha256": [
+        "667401b9294b34b3a190f35a9a454791ec30c60064842ad0d8e6ff300f421243",
+        "19a69b1f4d07b15325dcac5d17db90ee90c23bcb4ac21a0355e20afc567f6714",
+        "ae30e4079480dcddbbc820ccce9f4a0aaa251841cfe5d05c7e61239a0e5388cb"
+      ]
+    }
+  ],
+  "greedy_oracle": {
+    "source": "official checkpoint, transformers CPU float64, temperature 0",
+    "runs": [
+      {
+        "prompt": "The capital of France is",
+        "exact_tokens": 16,
+        "total_tokens": 16,
+        "generated_token_ids": [
+          8181,
+          33,
+          280,
+          4321,
+          35167,
+          374,
+          836,
+          7943,
+          3499,
+          33,
+          6826,
+          9692,
+          33,
+          316,
+          5608,
+          5087
+        ],
+        "median_generated_ms": 106.11435399914626,
+        "tokens_per_second": 9.423795766669281
+      },
+      {
+        "prompt": "1, 2, 3, 4,",
+        "exact_tokens": 16,
+        "total_tokens": 16,
+        "generated_token_ids": [
+          242,
+          42,
+          33,
+          242,
+          43,
+          33,
+          242,
+          44,
+          33,
+          242,
+          45,
+          33,
+          242,
+          46,
+          33,
+          242
+        ],
+        "median_generated_ms": 105.57204149881727,
+        "tokens_per_second": 9.472204816757314
+      },
+      {
+        "prompt": "def add(a, b):",
+        "exact_tokens": 16,
+        "total_tokens": 16,
+        "generated_token_ids": [
+          223,
+          220,
+          223,
+          220,
+          223,
+          220,
+          223,
+          220,
+          223,
+          220,
+          223,
+          220,
+          223,
+          220,
+          223,
+          220
+        ],
+        "median_generated_ms": 105.53341650302173,
+        "tokens_per_second": 9.475671622659606
+      }
+    ],
+    "eos_probe": {
+      "prompt": "1+1 equals",
+      "generated_tokens": 9,
+      "generated_token_ids": [
+        242,
+        39,
+        220,
+        608,
+        4219,
+        357,
+        242,
+        39,
+        130073
+      ],
+      "reason": "eos",
+      "text": " 2\nThe answer is 2"
+    },
+    "report_sha256": {
+      "fast_prepare_oracle3.json": "1051be8e59f2b538f0fa5e11fe8a8e3bfa4ac3be19702758bea5602bef49be3a",
+      "fast_prepare_eos_zh.json": "f57a77e99bd172557961f3d9e5ee9b9b2b5393b268366c865f55cbf464268032",
+      "fast_prepare_phases.json": "7c5566c37d0b6a0319c48cab65a958303a2dd4229dbc704c7ebaa49c0a946715"
+    }
+  },
+  "performance": {
+    "merged_tokens_per_second_range": [
+      9.423795766669281,
+      9.475671622659606
+    ],
+    "accepted_49handle_tokens_per_second_range": [
+      4.89,
+      4.92
+    ],
+    "conservative_throughput_speedup": 1.91,
+    "approximate_token_latency_reduction_percent": 48,
+    "phase_median_ms": {
+      "prepare": 1.3072919973637909,
+      "transformer": 82.66466650093207,
+      "kv_scatter": 0.36749950231751427,
+      "head_execute": 20.371353999507846,
+      "argmax": 0.9376044981763698,
+      "total": 105.66195899809827
+    },
+    "same_run_host_kv_throughput_gain_percent_range": [10.335, 11.041]
+  },
+  "known_nonblocking": {
+    "prefill_layer2_v_slice_cosine": 0.9711191219194694,
+    "note": "The packed public V output passes at 0.996646. The low-energy layer-2 slice remains a future target if per-layer-slice gating is adopted."
+  },
+  "verdict": {
+    "board_load": "PASS",
+    "public_output_numeric": "PASS",
+    "greedy_exact": "PASS",
+    "eos": "PASS",
+    "one_prefill_one_decode": "PASS",
+    "overall": "PASS"
+  }
+}

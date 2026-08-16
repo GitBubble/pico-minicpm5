@@ -39,17 +39,23 @@ def test_board_covers_every_profile_with_an_om_and_stays_portable() -> None:
 def test_ctx1024_phases_equal_the_frozen_qualification_record() -> None:
     frozen = json.loads(
         FROZEN_QUALIFICATION.read_text(encoding="utf-8"))["performance"]
+    # The headline is now the unified-executor session; the frozen v0.1.0
+    # numbers must still be carried verbatim in the superseded block, so the
+    # release can always show what changed and by how much.
     entry = _entry("ctx1024")
-    phases = entry["steady_state_p50_ms"]
+    prior = entry["superseded_pre_unification"]
+    phases = prior["steady_state_p50_ms"]
     for key, source in (
             ("prepare", "prepare"), ("transformer", "transformer"),
             ("kv", "kv_scatter"), ("head", "head_execute"),
             ("argmax", "argmax"), ("total", "total")):
         assert phases[key] == frozen["phase_median_ms"][source], key
-    assert entry["tokens_per_second"]["range"] == \
+    assert prior["tokens_per_second"]["range"] == \
         frozen["merged_tokens_per_second_range"]
-    assert entry["tokens_per_second"]["baseline_49_handle_range"] == \
+    assert prior["tokens_per_second"]["baseline_49_handle_range"] == \
         frozen["accepted_49handle_tokens_per_second_range"]
+    # and the headline must be faster than what it superseded
+    assert entry["steady_state_p50_ms"]["total"] < phases["total"]
     assert entry["tokens_per_second"]["speedup_over_baseline"] == \
         frozen["conservative_throughput_speedup"]
 
@@ -140,9 +146,13 @@ def test_phase_sums_and_mode_table_are_internally_consistent() -> None:
         derived = 1000.0 / mode["total_p50_ms"]
         assert abs(derived - mode["tokens_per_second"]) < 0.02, mode["mode"]
 
-    # The adopted A/B mode is the ctx8192 steady state reported above.
+    # The A/B compares the pre-unification executor family, so its adopted
+    # mode is the ctx8192 number that the unified executor superseded, and the
+    # unified headline must be at least as fast as the best mode in the table.
     assert modes["zero-once"]["total_p50_ms"] == \
-        _entry("ctx8192")["steady_state_p50_ms"]["total"]
+        _entry("ctx8192")["superseded_pre_unification"]["gate_reported"]["total_p50_ms"]
+    assert _entry("ctx8192")["steady_state_p50_ms"]["total"] <= \
+        min(mode["total_p50_ms"] for mode in ab["modes"])
     assert ab["context"] == 8192
 
 

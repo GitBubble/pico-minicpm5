@@ -7,6 +7,7 @@ import tarfile
 
 import pytest
 
+from pico_minicpm5 import __version__
 from pico_minicpm5.release.runtime import create_runtime_archive
 
 
@@ -14,7 +15,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path]:
     root = tmp_path / "project"
     (root / "app/native").mkdir(parents=True)
     (root / "app/src").mkdir(parents=True)
-    (root / "release/v0.1.0").mkdir(parents=True)
+    (root / f"release/v{__version__}").mkdir(parents=True)
     (root / "app/chat.sh").write_text("#!/bin/sh\n", encoding="utf-8")
     (root / "app/native/Makefile").write_text("all:\n\ttrue\n", encoding="utf-8")
     (root / "app/src/minicpm_prefill_schedule.py").write_text(
@@ -35,7 +36,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path]:
         "runtime": {"executor_binary": {
             "bytes": len(elf), "sha256": hashlib.sha256(elf).hexdigest()}}
     }
-    (root / "release/v0.1.0/release-manifest.json").write_text(
+    (root / f"release/v{__version__}/release-manifest.json").write_text(
         json.dumps(manifest), encoding="utf-8")
     return root, executor
 

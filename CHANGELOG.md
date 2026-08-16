@@ -2,34 +2,57 @@
 
 [中文](CHANGELOG.zh-CN.md)
 
-## Unreleased
+## 0.2.0 - 2026-08-17
 
-### Mixed prefill-window contract and extended-context numeric gate - 2026-08-12
+### The executor is reproducible, and every context got faster
 
-- Runtime profiles move to schema v2 with an explicit `context.prefill_window`.
-  ctx4096 and ctx8192 formalize the mixed contract already exercised on the
-  board: position zero bootstraps on the frozen qualified ctx1024
-  `models/prefill.om`, the per-context decode OM owns the full context, and
-  prompt tokens after position zero go through the S1/native-prefill planner.
-- The board server validates the prefill handle against its own declared
-  window (mask width and K/V cache bytes), forbids host-KV mirroring and
-  dynamic slot probing under a mixed profile, and reports the window at
-  startup.
-- Added `release/contexts/` qualification records and a pure-JSON validator
-  (`pico-minicpm5 qualify-context-profile`) in the mold of the frozen ctx1024
-  gate: threshold floor `0.98` exclusive over all public outputs, positions
-  including the last valid one, greedy/EOS/boundary/board-load verdicts, and
-  hash bindings for the decode OM, inherited prefill/head and source evidence.
-- ctx4096 flips to `qualified`: minimum public-output cosine `0.9908` at
-  position 4095, board tail byte-exact with libinstsim, 48/48 greedy tokens,
-  EOS and boundary fail-closed all PASS (`6.53 token/s` at p50 `153.1 ms`).
-- ctx8192 stays `pending` with its candidate evidence checked in: public
-  outputs clear the gate (minimum `0.9861`), but the strict-EOS sequence gate
-  fails, calibration is donor-zero-extended rather than native, and the
-  overall verdict is `CANDIDATE_STRICT_EOS_FAIL`.
-- Added the OpenClaw adapter package under `app/openclaw/` with the bilingual
-  user guide `docs/OPENCLAW_USAGE.zh-CN.md`; v0.1.0/ctx1024 remains below
-  OpenClaw's 4096-token floor and must not be shipped as OpenClaw-ready.
+- The board executor is now bound to `cef4edb2…`, built from the source in this
+  repository with the sanctioned `aarch64-mix210-linux-gcc` 7.3.0 toolchain and
+  verified byte-identical before the manifest was written
+  (`docs/EXECUTOR_BUILD.md`). `v0.1.0` pinned a binary its own source could not
+  rebuild.
+- It retains the workspace input across executes instead of rewriting it, so a
+  decode step saves one full workspace write. Measured on all three contexts in
+  one session: ctx1024 `9.46 → 9.96 tok/s` (+5.2%), ctx4096
+  `6.53 → 7.81 tok/s` (+19.7%), ctx8192 `4.59 → 6.03 tok/s` (+31.6%). All 48
+  greedy-oracle tokens stay identical to each profile's qualified baseline.
+- The saving is proportional to the retained workspace — 5.5 / 27.6 / 54.9 ms
+  against 24.6 / 98.3 / 196.6 MiB — three points on one line, which is what
+  makes it a mechanism rather than a coincidence.
+- Prompt ingestion, the quantity TTFT is made of, is now measured on all three:
+  `79.49` / `106.28` / `144.02` ms per prompt token. The ctx1024 figure agrees
+  with an independent cold-prefill measurement to `0.10%`.
+
+### ctx4096 ships qualified under the mixed prefill-window contract
+
+- Runtime profiles carry `context.prefill_window`; ctx4096 and ctx8192 bootstrap
+  position zero on the frozen ctx1024 `prefill.om` and share `head_flat.om`,
+  byte for byte. Measured directly: their position-zero transformer times agree
+  to `0.39 ms`.
+- ctx4096 is `qualified`; ctx8192 stays `pending` on donor-zero-extend
+  calibration, with the Chinese oracle, memory envelope and long-prompt items
+  still open.
+
+### A gate that was measuring the wrong thing
+
+- ctx8192 had carried `eos: FAIL_STRICT_SEQUENCE_MISMATCH` against a sequence
+  that was never traced to the reference. Re-derived from the pinned checkpoint
+  in float64, the reference writes a terminal period and stops — which ctx8192
+  reproduces exactly and ctx1024 and ctx4096 do not. The expectation had been
+  recorded from the first artifact that ran. `release/contexts/strict-eos-oracle.md`.
+
+### Documentation
+
+- A recorded board agent session on both homepages as a self-contained animated
+  SVG: a tool call returning in `1.9 ms`, a context rebase, and generation at
+  `9.74 tok/s`. Waits play at `4.5x` with the factor on screen and the board's
+  own clock on every frame.
+- `docs/QUANTIZATION_CONTRACT.md`: how a `Clip` caps ATC's IFMR range search,
+  why position zero needs its own calibration family (the layer-0 MLP branch,
+  not attention — the attention explanation is documented as refuted), and one
+  repeated rule retracted because its own proof artifact contradicts it.
+- `release/perf/` gains TTFT, the per-context phase breakdown, the superseded
+  pre-unification numbers and evidence hashes for each.
 
 ## 0.1.0 - 2026-08-09
 

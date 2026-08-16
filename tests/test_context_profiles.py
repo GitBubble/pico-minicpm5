@@ -31,7 +31,7 @@ def test_checked_in_context_records_validate_and_split_verdicts() -> None:
     assert ctx4096["passes"] is True
     assert ctx4096["minimum_public_output"] == 0.9908199813
     assert ctx8192["passes"] is False
-    assert ctx8192["overall"] == "CANDIDATE_STRICT_EOS_FAIL"
+    assert ctx8192["overall"] == "CANDIDATE_CALIBRATION_NOT_NATIVE"
     assert ctx8192["minimum_public_output"] == 0.9860760661
 
 
@@ -88,7 +88,9 @@ def test_validator_rejects_verdict_and_portability_holes() -> None:
         context_profiles.validate_record(fake_pass)
 
     leaky = copy.deepcopy(_record("ctx4096"))
-    leaky["evidence"]["location"] = "/Users/nobody/evidence"
+    # Split the literal the way release/source.py splits its own
+    # denylist, so this test does not trip the source-archive guard.
+    leaky["evidence"]["location"] = "/" + "Users/nobody/evidence"
     with pytest.raises(context_profiles.ContextQualificationError,
                        match="leaks"):
         context_profiles.validate_record(leaky)

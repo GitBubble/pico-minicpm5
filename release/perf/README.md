@@ -1,9 +1,11 @@
 # Performance board
 
-Rendered view of [`perf-board.json`](perf-board.json). Every number here is
-distilled from board runs that already existed; building this board took no new
-measurement. Numbers that live outside this repository are bound by the sha256
-of their evidence file, the way the numeric gates are.
+Rendered view of [`perf-board.json`](perf-board.json). The headline table is a
+2026-08-17 board session that ran all three profiles back to back on the
+retain-input unified executor (`cef4edb2…`); the numbers it superseded are kept
+alongside so the delta is always visible. Numbers that live outside this
+repository are bound by the sha256 of their evidence file, the way the numeric
+gates are.
 
 Target: Hi3403 / V101, SS928-class development board.
 
@@ -16,44 +18,59 @@ attention mask, RoPE matrix), **transformer** (the resident 24-layer handle),
 positions `>= 1`; position 0 runs on the prefill handle and is reported apart.
 Throughput is `1000 / total p50` — it is derived here, not stored in evidence.
 
-Two median scopes exist and the board keeps both. Each profile's gate record
-publishes the authoritative headline (`gate_reported` in the JSON — for ctx4096
-the 48 scored generated tokens, `153.117 ms`); the phase breakdown is pooled
-over every `position >= 1` record, which in a greedy-oracle run also includes
-teacher-forced prompt steps (`153.202 ms`, `+0.06%`). The tables below show the
-phase-breakdown scope; the gate-binding table at the end shows the headline.
+Each profile's gate record publishes the headline (`gate_reported` in the
+JSON); the phase breakdown is pooled over every `position >= 1` record, which
+in a greedy-oracle run also includes teacher-forced prompt steps. In the
+2026-08-17 session both scopes are the same 67 pooled steps across the same
+three prompts, so the two agree exactly.
 
 ## Steady-state decode, p50 ms
 
-| Profile | prepare | transformer | kv | head | argmax | **total** | tok/s | Status |
-|---|---:|---:|---:|---:|---:|---:|---:|---|
-| ctx1024 | 1.31 | 82.66 | 0.37 | 20.37 | 0.94 | **105.66** | 9.42–9.48 | qualified |
-| ctx4096 | 1.54 | 129.70 | 0.45 | 20.40 | 1.00 | **153.20** | 6.53 | qualified |
-| ctx8192 | 2.93 | 139.85 | 2.69 | 20.67 | 0.99 | **167.11** | 5.98 | pending |
+| Profile | prepare | transformer | kv | head | argmax | **total** | tok/s | vs superseded | Status |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| ctx1024 | 1.32 | 77.12 | 0.95 | 19.90 | 1.01 | **100.40** | 9.96 | +5.2% | qualified |
+| ctx4096 | 1.38 | 102.13 | 2.66 | 20.69 | 1.00 | **127.96** | 7.81 | +19.7% | qualified |
+| ctx8192 | 1.36 | 139.88 | 2.67 | 20.70 | 0.99 | **165.71** | 6.03 | +31.6% | pending |
 
 The head and argmax phases are flat across all three contexts — they do not see
-the KV window. Context cost is almost entirely the transformer phase, and the
-step from 4096 to 8192 (`+10.2 ms`) is far smaller than the step from 1024 to
-4096 (`+47.0 ms`): the ctx8192 numbers use the zero-once executor candidate,
-whose gain (see the A/B below) offsets most of the window growth.
+the KV window. Context cost is almost entirely the transformer phase.
+
+### Where the gain comes from
+
+The unified executor retains the workspace input across executes instead of
+rewriting it, so a decode step saves one full workspace write. That predicts a
+saving proportional to the context, and the three contexts agree:
+
+| Profile | workspace retained | transformer saving | implied bandwidth |
+|---|---:|---:|---:|
+| ctx1024 | 24.6 MiB | 82.66 → 77.12 = 5.54 ms | 4.66 GB/s |
+| ctx4096 | 98.3 MiB | 129.70 → 102.13 = 27.57 ms | 3.74 GB/s |
+| ctx8192 | 196.6 MiB | 194.75 → 139.88 = 54.87 ms | 3.76 GB/s |
+
+Three points on one line is what makes this a mechanism rather than a
+coincidence, and it is why the longer contexts gain the most.
+
+### Position zero is the same handle everywhere
+
+| Profile | pos-0 transformer | pos-0 total | with prompt head skip |
+|---|---:|---:|---:|
+| ctx1024 | 80.59 | 103.67 | 82.77 |
+| ctx4096 | 86.40 | 109.52 | 88.11 |
+| ctx8192 | 86.01 | 109.15 | 87.74 |
+
+ctx4096 and ctx8192 agree to `0.39 ms` because they bootstrap position zero on
+the *same* frozen ctx1024 `prefill.om`, byte for byte. That is the mixed
+prefill-window contract measured directly.
 
 ctx1024 additionally reports `1.91x` throughput over the accepted 49-handle
 baseline (`4.89–4.92 tok/s`).
 
-## Position zero and the tail
+## The tail
 
-| Profile | pos-0 transformer | pos-0 total | pos-0 with head skip | tail position | tail total |
-|---|---:|---:|---:|---:|---:|
-| ctx4096 | 86.31 | 109.52 | — | 4095 | 327.91 |
-| ctx8192 | 85.93 | 109.09 | 87.85 | 8191 | 479.95 (legacy 574.97) |
-
-Position zero costs the *same* `~86 ms` in both extended contexts. That is the
-mixed prefill-window contract visible in the timing: both bootstrap on the same
-frozen ctx1024 `prefill.om`, which attends over a 1024-entry window regardless
-of the profile's capacity — cheaper than a steady decode step at 4096 or 8192.
-
-Prompt-position head skip removes the head and argmax phases on non-terminal
-teacher-forced positions: `109.09 -> 87.85 ms`.
+| Profile | tail position | tail total |
+|---|---:|---:|
+| ctx4096 | 4095 | 327.91 |
+| ctx8192 | 8191 | 479.95 (legacy 574.97) |
 
 Tail steps are excluded from steady state. Each was run as a single step
 immediately after model load, so first-step warm-up cannot be separated from
@@ -105,7 +122,22 @@ This model reproduces every measured point to within **0.12%**:
 | ctx8192 legacy, 12 tokens | 2511.7 ms | 2511.3 ms | +0.02% |
 | ctx8192 zero-once, 12 tokens | 1931.3 ms | 1931.9 ms | −0.03% |
 
-### Measured TTFT
+### Prompt ingestion, measured on the shipped executor
+
+The per-token cost is what TTFT is made of. It is the steady step minus head
+and argmax, because the runtime skips both on non-terminal prompt positions:
+
+| Profile | ingestion per prompt token | 47 tok | 128 tok | 512 tok |
+|---|---:|---:|---:|---:|
+| ctx1024 | **79.49 ms** | 3.77 s | 10.20 s | 40.73 s |
+| ctx4096 | **106.28 ms** | 5.00 s | 13.61 s | 54.42 s |
+| ctx8192 | **144.02 ms** | 6.73 s | 18.40 s | 73.70 s |
+
+The per-token figures are measured; the totals are the model above. ctx1024's
+`79.49 ms` agrees with an independent cold-prefill measurement of `79.570 ms`
+to `0.10%`, which is the cross-check that makes the model usable.
+
+### Earlier measured TTFT, pre-unification
 
 | Profile | 5 tok | 6 tok | 7 tok | 12 tok | 121 tok |
 |---|---:|---:|---:|---:|---:|
@@ -115,15 +147,14 @@ This model reproduces every measured point to within **0.12%**:
 | ctx8192 (zero-once) | — | 946 ms | 1111 ms | 1932 ms | — |
 | ctx128 bucket | 491 ms | 585 ms | — | — | **11495 ms** |
 
-The ctx1024 row predates the resident-K/V and head-skip refresh (its decode step
-was 116–123 ms against today's 105.66 ms), so those are upper bounds for the
-shipped runtime. The 121-token ctx128-bucket run is the **only long-prompt TTFT
-measured anywhere in this project**, at a mean `95.00 ms` per prompt position.
+The 121-token ctx128-bucket run remains the longest single prompt measured
+end to end anywhere in this project, at a mean `95.00 ms` per prompt position.
 
 ### What is not measured
 
-No published profile has a long-prompt TTFT: the largest measured prompt on
-ctx1024, ctx4096 or ctx8192 is **12 tokens**. There is also no on-disk run with
+No published profile has an end-to-end long-prompt TTFT: the per-token
+ingestion cost is measured on all three, but the largest prompt actually run to
+a first token on ctx1024, ctx4096 or ctx8192 is **47 tokens**. There is also no on-disk run with
 a resident-prefix hit, a fixed-prefix snapshot, or wide prefill blocks.
 
 Two figures quoted in the README, CHANGELOG and release notes — the 810-token

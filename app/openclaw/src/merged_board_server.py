@@ -33,7 +33,6 @@ import sys
 import time
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, "/root/minicpm5_gate/chat")
 sys.path.insert(0, str(HERE))
 
 import qualify_minicpm_greedy_chain as gc  # noqa: E402

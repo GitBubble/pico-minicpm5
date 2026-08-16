@@ -1,392 +1,908 @@
 {
-  "schema": "pico.minicpm5.performance-board.v1",
-  "generated_from": "existing board evidence only; no new measurement was taken to build this board",
-  "target": {
-    "soc": "Hi3403",
-    "npu_arch": "V101",
-    "board_family": "SS928-class development board"
-  },
-  "method": {
-    "phases": [
-      "prepare: host-side embedding row, attention mask and RoPE matrix preparation",
-      "transformer: resident 24-layer decode (or position-zero prefill) handle execution",
-      "kv: packed K/V publication into the canonical resident decode cache",
-      "head: vocabulary head handle execution",
-      "argmax: host-side argmax over the dense logits"
-    ],
-    "steady_state": "median over decode steps at position >= 1; position 0 runs on the prefill handle and is reported separately",
-    "scopes": {
-      "gate_reported": "the median scope the profile's own gate record publishes; this is the authoritative headline number",
-      "phase_breakdown": "pooled per-phase medians over the runs' position >= 1 records, which for a greedy-oracle run also include teacher-forced prompt steps; the two scopes agree to better than 0.1% where both exist"
-    },
-    "tokens_per_second": "derived as 1000 / total p50; not stored in the evidence files",
-    "tail_positions": "the last valid position of each context is measured in its own single-step run immediately after model load, so first-step warm-up cannot be separated from the position cost; excluded from steady state"
-  },
-  "contexts": [
-    {
-      "profile": "ctx1024",
-      "context": 1024,
-      "prefill_window": 1024,
-      "status": "qualified",
-      "contract": "uniform (decode and prefill share the compiled context)",
-      "runtime_mode": "resident packed K/V",
-      "steady_state_p50_ms": {
-        "prepare": 1.3072919973637909,
-        "transformer": 82.66466650093207,
-        "kv": 0.36749950231751427,
-        "head": 20.371353999507846,
-        "argmax": 0.9376044981763698,
-        "total": 105.66195899809827
-      },
-      "tokens_per_second": {
-        "range": [9.423795766669281, 9.475671622659606],
-        "baseline_49_handle_range": [4.89, 4.92],
-        "speedup_over_baseline": 1.91
-      },
-      "position_zero_ms": null,
-      "tail": null,
-      "gate_record": "release/v0.1.0/qualification.json",
-      "evidence": {
-        "in_repo": true,
-        "note": "phase medians and throughput are the performance block of the frozen v0.1.0 qualification record"
-      }
-    },
-    {
-      "profile": "ctx4096",
-      "context": 4096,
-      "prefill_window": 1024,
-      "status": "qualified",
-      "contract": "mixed prefill window (position zero on the frozen ctx1024 prefill.om)",
-      "runtime_mode": "resident packed K/V",
-      "gate_reported": {
-        "scope": "48 scored greedy-oracle generated tokens",
-        "total_p50_ms": 153.1166455,
-        "total_p95_ms": 154.6779517,
-        "transformer_p50_ms": 129.6994165,
-        "tokens_per_second": 6.53097
-      },
-      "steady_state_p50_ms": {
-        "prepare": 1.543,
-        "transformer": 129.7,
-        "kv": 0.447,
-        "head": 20.398,
-        "argmax": 0.999,
-        "total": 153.202
-      },
-      "steady_state_p95_ms": {
-        "prepare": 3.026,
-        "transformer": 129.886,
-        "kv": 0.462,
-        "head": 20.436,
-        "argmax": 1.193,
-        "total": 154.725
-      },
-      "steady_state_scope": "67 pooled steps at position >= 1 across 3 prompts (generated tokens plus teacher-forced prompt steps); 0.06% above the gate-reported scope",
-      "steady_state_steps": 67,
-      "tokens_per_second": {
-        "steady_state": 6.53
-      },
-      "position_zero_ms": {
-        "transformer": 86.31,
-        "total": 109.52,
-        "note": "position zero is ~43 ms faster than a steady decode step, entirely in the transformer phase, because the inherited ctx1024 prefill handle attends over a 1024-entry window instead of 4096"
-      },
-      "tail": {
-        "position": 4095,
-        "total_ms": 327.91,
-        "phase_ms": {
-          "prepare": 8.005,
-          "transformer": 294.454,
-          "kv": 3.755,
-          "head": 20.673,
-          "argmax": 1.024
-        },
-        "note": "single-step run after model load; head and argmax are unchanged, so the inflation is attention over the full window plus first-step warm-up, which the evidence cannot separate"
-      },
-      "gate_record": "release/contexts/ctx4096.qualification.json",
-      "evidence": {
-        "in_repo": false,
-        "source_record": "MINICPM5_CONTEXT4096_QUALIFICATION.json",
-        "source_sha256": "527a60e4471a534ab5e0172f0afe5a434d2e250cc3719ccfdc5cc612c1bc134b",
-        "files": [
-          {
-            "path": "p24c4096_agent_stock/board_oracle3.json",
-            "sha256": "a3748e82aa25bc77b269cf51743b140edbbe8c4c7d0b43734e780b76b04fed53",
-            "provides": "steady-state and position-zero phase records over 3 prompts / 48 generated tokens"
-          },
-          {
-            "path": "p24c4096_agent_stock/board_pos4095.json",
-            "sha256": "7ac8267ab03f3ea40c87aa645a88460b49121a971f0d569efa3047ceed698c24",
-            "provides": "the last-valid-position single-step record"
-          }
-        ]
-      }
-    },
-    {
-      "profile": "ctx8192",
-      "context": 8192,
-      "prefill_window": 1024,
-      "status": "pending",
-      "contract": "mixed prefill window (position zero on the frozen ctx1024 prefill.om)",
-      "runtime_mode": "resident packed K/V, retain-input v1 executor (ELF cef4edb2, supersedes zero-once v2_352; measured parity 167.266 ms / 5.9785 tok/s, binding evidence scratchpad/c8192_retain_ab_20260815/binding/)",
-      "gate_reported": {
-        "scope": "16-token cache-policy A/B run of the adopted zero-once candidate",
-        "total_p50_ms": 167.112812,
-        "transformer_p50_ms": 139.85125,
-        "tokens_per_second": 5.983982
-      },
-      "steady_state_scope": "16 steps at position >= 1 of the adopted-mode A/B run; the 48-token resident oracle of the same mode is slightly faster at 165.661 ms / 6.036 tok/s",
-      "steady_state_p50_ms": {
-        "prepare": 2.929,
-        "transformer": 139.851,
-        "kv": 2.694,
-        "head": 20.666,
-        "argmax": 0.989,
-        "total": 167.113
-      },
-      "steady_state_steps": 16,
-      "tokens_per_second": {
-        "steady_state": 5.98,
-        "oracle_pooled": 6.036,
-        "legacy_cached_oracle_pooled": 4.586
-      },
-      "position_zero_ms": {
-        "transformer": 85.934,
-        "total": 109.093,
-        "with_prompt_head_skip": 87.849,
-        "note": "the ~86 ms transformer time matches ctx4096 exactly, confirming both contexts bootstrap on the same ctx1024-ABI prefill handle; the head skip removes head and argmax entirely on non-terminal teacher-forced prompt positions"
-      },
-      "tail": {
-        "position": 8191,
-        "total_ms": 479.949,
-        "legacy_total_ms": 574.972,
-        "phase_ms": {
-          "prepare": 14.349,
-          "transformer": 433.119,
-          "kv": 10.221,
-          "head": 21.248,
-          "argmax": 1.011
-        },
-        "note": "same caveat as ctx4096; attention spans the full 8192-entry window"
-      },
-      "gate_record": "release/contexts/ctx8192.qualification.json",
-      "evidence": {
-        "in_repo": false,
-        "source_record": "MINICPM5_CONTEXT8192_QUALIFICATION.json",
-        "source_sha256": "14cd2620a3c0dfaf48692f6a2ec2684745611e1693c635dcae549f643a91739b",
-        "files": [
-          {
-            "path": "p24c8192_agent_stock/board_zero_once_v2_352_16.json",
-            "sha256": "e6c14f285c128c51ac9ca9a627f3fe60abd1012423e254dcc9e9829a92c2ca89",
-            "provides": "adopted-mode steady-state and position-zero phase records"
-          },
-          {
-            "path": "p24c8192_agent_stock/board_zero_once_v2_352_oracle3.json",
-            "sha256": "053b79df5caed8faae6cfd57cebc5e0cbef4a021efd1c565df9f1a6892e674c2",
-            "provides": "pooled 3-prompt oracle timing for the adopted mode"
-          },
-          {
-            "path": "p24c8192_agent_stock/board_zero_once_v2_352_pos8191.json",
-            "sha256": "60fc8e0a6563e4aa7b5611c24bb3a3b954fb0c4b460cc16590b151c82101c2bc",
-            "provides": "the last-valid-position single-step record"
-          },
-          {
-            "path": "p24c8192_agent_stock/board_pos8191.json",
-            "sha256": "73d20576800ce86e2d9e0903779100f8eb6ea963c412e3028042df7b13dc5c19",
-            "provides": "the legacy-mode last-position record"
-          }
-        ]
-      }
-    }
+ "schema": "pico.minicpm5.performance-board.v1",
+ "generated_from": "board evidence: the pre-unification numbers come from the existing qualification records; the unified_executor block of each context is a 2026-08-17 session run for this board, all three profiles in one sitting",
+ "target": {
+  "soc": "Hi3403",
+  "npu_arch": "V101",
+  "board_family": "SS928-class development board"
+ },
+ "method": {
+  "phases": [
+   "prepare: host-side embedding row, attention mask and RoPE matrix preparation",
+   "transformer: resident 24-layer decode (or position-zero prefill) handle execution",
+   "kv: packed K/V publication into the canonical resident decode cache",
+   "head: vocabulary head handle execution",
+   "argmax: host-side argmax over the dense logits"
   ],
-  "executor_mode_ab": {
-    "context": 8192,
-    "workload": "one 2-token prompt, 16 generated tokens, identical token ids across every mode",
-    "token_identity": "all five modes produced byte-identical position-1 raw outputs and the same 16 generated token ids, so this table compares cost only",
-    "modes": [
-      {
-        "mode": "cached",
-        "total_p50_ms": 219.303,
-        "tokens_per_second": 4.56,
-        "phase_p50_ms": {"prepare": 3.004, "transformer": 194.536, "kv": 0.432, "head": 20.392, "argmax": 1.004},
-        "verdict": "baseline",
-        "note": "every handle memory-cached; slow legacy transformer path",
-        "evidence_sha256": "7221a1464e41a16e6d4ea70e6229aee91d25971b03c9468b844c507f5345f24c"
-      },
-      {
-        "mode": "nocache",
-        "total_p50_ms": 222.344,
-        "tokens_per_second": 4.5,
-        "phase_p50_ms": {"prepare": 2.864, "transformer": 171.247, "kv": 2.678, "head": 20.388, "argmax": 25.214},
-        "verdict": "rejected",
-        "note": "uncaching speeds the transformer by 23 ms but costs 24 ms in argmax; net slowest",
-        "evidence_sha256": "bfbb8f4cc392606b972dcceeeea762ac90aa52acb471111c76e20fb2d5f773c1"
-      },
-      {
-        "mode": "per-model-mixed",
-        "total_p50_ms": 198.567,
-        "tokens_per_second": 5.036,
-        "phase_p50_ms": {"prepare": 2.944, "transformer": 171.303, "kv": 2.689, "head": 20.665, "argmax": 0.996},
-        "verdict": "superseded",
-        "note": "uncached transformer with a cached argmax handle; isolates that the nocache penalty was entirely in argmax",
-        "evidence_sha256": "e46b6c52216618f4aed4783bdc643d88e80c164da119f47cfe7da6ab2573684b"
-      },
-      {
-        "mode": "zero-once",
-        "total_p50_ms": 167.113,
-        "tokens_per_second": 5.984,
-        "phase_p50_ms": {"prepare": 2.929, "transformer": 139.851, "kv": 2.694, "head": 20.666, "argmax": 0.989},
-        "verdict": "adopted",
-        "note": "v2_352 zero-once executor candidate; 23.8% faster than the cached baseline",
-        "evidence_sha256": "e6c14f285c128c51ac9ca9a627f3fe60abd1012423e254dcc9e9829a92c2ca89"
-      },
-      {
-        "mode": "promptskip+zero-once",
-        "total_p50_ms": 167.282,
-        "tokens_per_second": 5.978,
-        "phase_p50_ms": {"prepare": 2.93, "transformer": 139.865, "kv": 2.694, "head": 20.666, "argmax": 0.989},
-        "verdict": "adopted",
-        "note": "steady state is unchanged by design; the gain is at prompt positions only, where the head and argmax are skipped (109.093 -> 87.849 ms at position 0)",
-        "evidence_sha256": "5ab6b15bdfc57f2d973655b16ed1abd2eb2138323e7828a552d12fad8cfc76fb"
-      }
-    ]
+  "steady_state": "median over decode steps at position >= 1; position 0 runs on the prefill handle and is reported separately",
+  "scopes": {
+   "gate_reported": "the median scope the profile's own gate record publishes; this is the authoritative headline number",
+   "phase_breakdown": "pooled per-phase medians over the runs' position >= 1 records, which for a greedy-oracle run also include teacher-forced prompt steps; the two scopes agree to better than 0.1% where both exist"
   },
-  "ttft": {
-    "definition": "time to first token: wall time from request start until the first generated token, i.e. every prompt-ingestion step summed. Position 0 runs on the prefill handle, positions 1..N-1 run on the decode handle one token at a time, and the head plus argmax run once at the last prompt position. Model load time is excluded; it is reported separately as a cold-start cost.",
-    "why_decode_dominates": "the prefill handle and the vocabulary head each execute exactly once per request, while the decode handle executes N-1 times for an N-token prompt. Beyond a handful of prompt tokens, TTFT is almost entirely decode-handle time, which is why the wide-block prefill planner (S16/S32/S128) targets the decode side rather than a per-context prefill binary.",
-    "model": {
-      "formula": "ttft_ms ~= position_zero_total_ms + (prompt_tokens - 1) * decode_step_total_ms",
-      "validated_against_measurement": [
-        {"case": "ctx128 bucket, 121 tokens", "model_ms": 11509.6, "measured_ms": 11495.294, "error_percent": 0.12},
-        {"case": "ctx4096, 12 tokens", "model_ms": 1795.8, "measured_ms": 1796.246, "error_percent": -0.02},
-        {"case": "ctx8192 legacy, 12 tokens", "model_ms": 2511.7, "measured_ms": 2511.252, "error_percent": 0.02},
-        {"case": "ctx8192 zero-once, 12 tokens", "model_ms": 1931.3, "measured_ms": 1931.855, "error_percent": -0.03}
-      ],
-      "status": "the formula reproduces every measured point to within 0.12%, but it is a model; a projected long-prompt TTFT is not a measurement and is never reported as one below"
+  "tokens_per_second": "derived as 1000 / total p50; not stored in the evidence files",
+  "tail_positions": "the last valid position of each context is measured in its own single-step run immediately after model load, so first-step warm-up cannot be separated from the position cost; excluded from steady state"
+ },
+ "contexts": [
+  {
+   "profile": "ctx1024",
+   "context": 1024,
+   "prefill_window": 1024,
+   "status": "qualified",
+   "contract": "uniform (decode and prefill share the compiled context)",
+   "runtime_mode": "resident packed K/V",
+   "gate_record": "release/v0.1.0/qualification.json",
+   "superseded_pre_unification": {
+    "reason": "measured on the executor that v0.1.0 pinned; superseded by the retain-input unified executor bound in v0.2.0",
+    "steady_state_p50_ms": {
+     "prepare": 1.3072919973637909,
+     "transformer": 82.66466650093207,
+     "kv": 0.36749950231751427,
+     "head": 20.371353999507846,
+     "argmax": 0.9376044981763698,
+     "total": 105.66195899809827
     },
-    "measured": [
-      {
-        "profile": "ctx1024",
-        "runtime": "2026-08-09 three-handle acceptance runtime, before the resident-K/V and head-skip refresh; its decode step was 116-123 ms rather than today's 105.66 ms, so these are upper bounds for the shipped runtime",
-        "points": [
-          {"prompt_tokens": 5, "ttft_ms": 831.445, "prompt": "1+1 equals"},
-          {"prompt_tokens": 6, "ttft_ms": 965.434, "prompt": "The capital of France is"},
-          {"prompt_tokens": 7, "ttft_ms": 1064.241, "prompt": "def add(a, b):"},
-          {"prompt_tokens": 9, "ttft_ms": 1312.655, "prompt": "Chinese prompt"},
-          {"prompt_tokens": 12, "ttft_ms": 1639.046, "prompt": "1, 2, 3, 4,"}
-        ],
-        "evidence": [
-          {"path": "release_3handle/reports/e2e_oracle3.json", "sha256": "eaa485388013efad52485bcd379e3eac133022cc9d5a03a04ce29dd008abd639"},
-          {"path": "release_3handle/reports/e2e_chat2.json", "sha256": "b7dcfdd7783080c9fb6618ee40f3e21e18a27786184820bb63246157c2f258b5"}
-        ]
-      },
-      {
-        "profile": "ctx4096",
-        "runtime": "mixed prefill window, resident packed K/V, no head skip",
-        "points": [
-          {"prompt_tokens": 5, "ttft_ms": 722.768, "prompt": "1+1 equals"},
-          {"prompt_tokens": 6, "ttft_ms": 880.953, "prompt": "The capital of France is"},
-          {"prompt_tokens": 7, "ttft_ms": 1043.961, "prompt": "def add(a, b):"},
-          {"prompt_tokens": 12, "ttft_ms": 1796.246, "prompt": "1, 2, 3, 4,"}
-        ],
-        "evidence": [
-          {"path": "p24c4096_agent_stock/board_oracle3.json", "sha256": "a3748e82aa25bc77b269cf51743b140edbbe8c4c7d0b43734e780b76b04fed53"},
-          {"path": "p24c4096_agent_stock/board_eos.json", "sha256": "39a08c53fafc306835e7abf4c2263dbfe501f090ef0a3601bde80310c8c41df9"}
-        ]
-      },
-      {
-        "profile": "ctx8192",
-        "runtime": "mixed prefill window; both the legacy cached executor and the adopted zero-once v2_352 candidate",
-        "points": [
-          {"prompt_tokens": 5, "ttft_ms": 983.573, "prompt": "1+1 equals", "mode": "legacy cached"},
-          {"prompt_tokens": 6, "ttft_ms": 1206.344, "prompt": "The capital of France is", "mode": "legacy cached"},
-          {"prompt_tokens": 6, "ttft_ms": 946.248, "prompt": "The capital of France is", "mode": "zero-once"},
-          {"prompt_tokens": 7, "ttft_ms": 1424.957, "prompt": "def add(a, b):", "mode": "legacy cached"},
-          {"prompt_tokens": 7, "ttft_ms": 1110.582, "prompt": "def add(a, b):", "mode": "zero-once"},
-          {"prompt_tokens": 12, "ttft_ms": 2511.252, "prompt": "1, 2, 3, 4,", "mode": "legacy cached"},
-          {"prompt_tokens": 12, "ttft_ms": 1931.855, "prompt": "1, 2, 3, 4,", "mode": "zero-once"}
-        ],
-        "evidence": [
-          {"path": "p24c8192_agent_stock/board_oracle3.json", "sha256": "65c7261e9f30b6e6528b3e9a5323a49f41d41a8e4e565820c089ef6b38119e82"},
-          {"path": "p24c8192_agent_stock/board_zero_once_v2_352_oracle3.json", "sha256": "053b79df5caed8faae6cfd57cebc5e0cbef4a021efd1c565df9f1a6892e674c2"},
-          {"path": "p24c8192_agent_stock/board_eos.json", "sha256": "0918365c977795c5717767cb686e61c047f088938592b87d500acccace13a084"}
-        ]
-      },
-      {
-        "profile": "ctx128-bucket",
-        "runtime": "short-context decode bucket with the ctx1024 prefill handle at position 0; not a published runtime profile, included because it carries the only long-prompt TTFT measured anywhere",
-        "points": [
-          {"prompt_tokens": 5, "ttft_ms": 490.92, "prompt": "1+1 equals"},
-          {"prompt_tokens": 6, "ttft_ms": 585.358, "prompt": "The capital of France is"},
-          {"prompt_tokens": 9, "ttft_ms": 873.902, "prompt": "Chinese prompt"},
-          {"prompt_tokens": 121, "ttft_ms": 11495.294, "prompt": "121-token boundary probe", "mean_ms_per_prompt_position": 95.0}
-        ],
-        "evidence": [
-          {"path": "p24c128_shipping/board_reports/c128_shipping_boundary.json", "sha256": "fdd4e00f3164dd00e80a0bd90d47418a3d3729b50909519b7aa6e3784c1958a0"},
-          {"path": "p24c128_shipping/board_reports/c128_shipping_oracle3.json", "sha256": "86db1ff88ae3d6da90830193714e2e6987623dd5e8e27e898099abc71fb3bd02"},
-          {"path": "p24c128_shipping/board_reports/c128_shipping_eos_zh.json", "sha256": "3d70ed3610cfcd37f3c8527bec54196292f5b23491f61ea54a24633d3ee4901b"}
-        ]
-      }
+    "steady_state_p95_ms": null,
+    "gate_reported": null,
+    "tokens_per_second": {
+     "range": [
+      9.423795766669281,
+      9.475671622659606
+     ],
+     "baseline_49_handle_range": [
+      4.89,
+      4.92
+     ],
+     "speedup_over_baseline": 1.91
+    },
+    "position_zero_ms": null,
+    "tail": null,
+    "evidence": {
+     "in_repo": true,
+     "note": "phase medians and throughput are the performance block of the frozen v0.1.0 qualification record"
+    }
+   },
+   "executor_sha256": "cef4edb2ca71a3fd3b2f7ef9612d8090fb25fe95a19c465cd312383cf76a0374",
+   "measured": "2026-08-17, one board session, all three profiles, same protocol",
+   "steady_state_p50_ms": {
+    "prepare": 1.324,
+    "transformer": 77.118,
+    "kv": 0.946,
+    "head": 19.899,
+    "argmax": 1.008,
+    "total": 100.4
+   },
+   "steady_state_p95_ms": {
+    "total": 101.934
+   },
+   "steady_state_steps": 67,
+   "steady_state_scope": "67 pooled steps at position >= 1 across the same 3 prompts, one board session for all three profiles",
+   "gate_reported": {
+    "scope": "48 scored greedy-oracle generated tokens",
+    "total_p50_ms": 100.4,
+    "total_p95_ms": 101.934,
+    "transformer_p50_ms": 77.118,
+    "tokens_per_second": 9.96
+   },
+   "tokens_per_second": {
+    "steady_state": 9.96,
+    "speedup_over_baseline": 1.91,
+    "baseline_49_handle_range": [
+     4.89,
+     4.92
     ],
-    "prompt_head_skip": {
-      "claim": "skipping the vocabulary head and argmax on non-terminal prompt positions removes 21.2 ms per ingested token",
-      "measured_scope": "a 2-token prompt on ctx8192: 260.885 ms with the skip against 282.159 ms without, a 21.27 ms difference concentrated at position 0 (87.849 ms against 109.093 ms)",
-      "evidence": [
-        {"path": "p24c8192_agent_stock/board_promptskip_zero_once_16.json", "sha256": "5ab6b15bdfc57f2d973655b16ed1abd2eb2138323e7828a552d12fad8cfc76fb"},
-        {"path": "p24c8192_agent_stock/board_zero_once_v2_352_16.json", "sha256": "e6c14f285c128c51ac9ca9a627f3fe60abd1012423e254dcc9e9829a92c2ca89"}
-      ],
-      "long_prompt_status": "not measured; the source record marks its own long-prompt figure measured_long_prompt=false and accepted_as_long_prompt_qualification=false"
-    },
-    "unbound_prose_claims": {
-      "note": "these figures appear in README, CHANGELOG, the routing doc and the v0.1.0 release notes but have no retrievable per-step record anywhere; they were produced live on the board and only summarized. They are reproduced here as prose provenance, not as board-bound evidence, and no gate depends on them.",
-      "claims": [
-        "a rebased 810-token cold request fell from 86.70 s to 69.45 s (19.89%) under prompt head skip",
-        "a 643-token resident-prefix hit reduced the same request to 14.61 s, restoring the prefix in 7.15 ms"
-      ],
-      "resolution": "re-run both on the board with the report written to disk, then promote them into the measured table above"
-    },
-    "not_measured": [
-      "long-prompt TTFT for ctx1024, ctx4096 and ctx8192: the largest measured prompt on any published profile is 12 tokens",
-      "TTFT with a resident-prefix hit or a fixed-prefix snapshot: no run with those metrics was written to disk",
-      "TTFT with wide prefill blocks (S16/S32/S128): only strict S1 is enabled in the qualified release",
-      "cold-start model load is excluded from every number above; it was 2.6-12.9 s across the recorded runs"
+    "speedup_over_baseline_unified": 2.03
+   },
+   "gain_over_previous": {
+    "previous_total_ms": 105.662,
+    "previous_tokens_per_second": 9.4638,
+    "percent": 5.2
+   },
+   "mechanism": {
+    "retained_workspace_bytes": 25837568,
+    "transformer_saving_ms": 5.55,
+    "effective_avoided_bandwidth_gb_s": 4.66,
+    "note": "the executor retains the workspace input across executes; the saving is one full workspace write per step and scales with the context"
+   },
+   "prompt_ingestion_ms_per_token": 79.49,
+   "tokens_identical_to_qualified_baseline": true,
+   "greedy_oracle": "48/48 across the same 3 prompts",
+   "eos_probe": {
+    "generated": [
+     242,
+     39,
+     220,
+     608,
+     4219,
+     357,
+     242,
+     39,
+     130073
+    ],
+    "matches_fp64_reference": false,
+    "reference": [
+     242,
+     39,
+     220,
+     608,
+     4219,
+     357,
+     242,
+     39,
+     35,
+     1
+    ],
+    "note": "the FP64 reference emits '.' (35) then EOS (1); see release/contexts/strict-eos-oracle.md"
+   },
+   "evidence": {
+    "in_repo": false,
+    "files": [
+     {
+      "path": "unified_elf_20260817/oracle3_v2_ctx1024.json",
+      "sha256": "d533c94205eda9b943e4934d116ce0c75768208cb39485958f017acb461b8515",
+      "provides": "3-prompt resident oracle, phase records"
+     },
+     {
+      "path": "unified_elf_20260817/eos_v2_ctx1024.json",
+      "sha256": "f844a5aadbb864d00a3f2388919570d33ce912503e88aa5facbaeb1b3d8b20bb",
+      "provides": "EOS probe"
+     }
     ]
+   },
+   "tail": null,
+   "position_zero_ms": {
+    "transformer": 80.594,
+    "head_execute": 19.889,
+    "total": 103.672,
+    "with_prompt_head_skip": 82.775,
+    "note": "all three profiles bootstrap position zero on the same frozen ctx1024 prefill.om; ctx4096 and ctx8192 agree to 0.39 ms, which is the shared handle showing through. with_prompt_head_skip is derived by removing head and argmax, which the runtime skips on non-terminal teacher-forced prompt positions"
+   }
   },
-  "gate_binding": {
-    "policy": "a performance number is publishable only alongside the numeric gate that the same artifact passed; throughput never substitutes for a cosine or token gate",
-    "entries": [
+  {
+   "profile": "ctx4096",
+   "context": 4096,
+   "prefill_window": 1024,
+   "status": "qualified",
+   "contract": "mixed prefill window (position zero on the frozen ctx1024 prefill.om)",
+   "runtime_mode": "resident packed K/V",
+   "steady_state_scope": "67 pooled steps at position >= 1 across the same 3 prompts, one board session for all three profiles",
+   "steady_state_steps": 67,
+   "gate_record": "release/contexts/ctx4096.qualification.json",
+   "superseded_pre_unification": {
+    "reason": "measured on the executor that v0.1.0 pinned; superseded by the retain-input unified executor bound in v0.2.0",
+    "steady_state_p50_ms": {
+     "prepare": 1.543,
+     "transformer": 129.7,
+     "kv": 0.447,
+     "head": 20.398,
+     "argmax": 0.999,
+     "total": 153.202
+    },
+    "steady_state_p95_ms": {
+     "prepare": 3.026,
+     "transformer": 129.886,
+     "kv": 0.462,
+     "head": 20.436,
+     "argmax": 1.193,
+     "total": 154.725
+    },
+    "gate_reported": {
+     "scope": "48 scored greedy-oracle generated tokens",
+     "total_p50_ms": 153.1166455,
+     "total_p95_ms": 154.6779517,
+     "transformer_p50_ms": 129.6994165,
+     "tokens_per_second": 6.53097
+    },
+    "tokens_per_second": {
+     "steady_state": 6.53
+    },
+    "position_zero_ms": {
+     "transformer": 86.31,
+     "total": 109.52,
+     "note": "position zero is ~43 ms faster than a steady decode step, entirely in the transformer phase, because the inherited ctx1024 prefill handle attends over a 1024-entry window instead of 4096"
+    },
+    "tail": {
+     "position": 4095,
+     "total_ms": 327.91,
+     "phase_ms": {
+      "prepare": 8.005,
+      "transformer": 294.454,
+      "kv": 3.755,
+      "head": 20.673,
+      "argmax": 1.024
+     },
+     "note": "single-step run after model load; head and argmax are unchanged, so the inflation is attention over the full window plus first-step warm-up, which the evidence cannot separate"
+    },
+    "evidence": {
+     "in_repo": false,
+     "source_record": "MINICPM5_CONTEXT4096_QUALIFICATION.json",
+     "source_sha256": "527a60e4471a534ab5e0172f0afe5a434d2e250cc3719ccfdc5cc612c1bc134b",
+     "files": [
       {
-        "profile": "ctx1024",
-        "gate_record": "release/v0.1.0/qualification.json",
-        "decode_om_sha256": "59d6bfc9f66edbacc90896f723320041fc6c352d85306054e090b13ecaf774b1",
-        "prefill_om_sha256": "fea09d294513839ccab846050193def475859f4352e2cb3fad7c2f8f1dfa4536",
-        "gate_verdict": "PASS",
-        "minimum_public_output": 0.9966460425468881
+       "path": "p24c4096_agent_stock/board_oracle3.json",
+       "sha256": "a3748e82aa25bc77b269cf51743b140edbbe8c4c7d0b43734e780b76b04fed53",
+       "provides": "steady-state and position-zero phase records over 3 prompts / 48 generated tokens"
       },
       {
-        "profile": "ctx4096",
-        "gate_record": "release/contexts/ctx4096.qualification.json",
-        "decode_om_sha256": "9f456c6b5d716fc97d9be936767e0464eb9868ab3abcd172163139c7bd05254e",
-        "prefill_om_sha256": "fea09d294513839ccab846050193def475859f4352e2cb3fad7c2f8f1dfa4536",
-        "gate_verdict": "PASS",
-        "minimum_public_output": 0.9908199813
-      },
-      {
-        "profile": "ctx8192",
-        "gate_record": "release/contexts/ctx8192.qualification.json",
-        "decode_om_sha256": "1c1c345deddf64e3af3b3c89bee07aba65035620d9e08d69b11b6c9aeb233c3d",
-        "prefill_om_sha256": "fea09d294513839ccab846050193def475859f4352e2cb3fad7c2f8f1dfa4536",
-        "gate_verdict": "CANDIDATE_STRICT_EOS_FAIL",
-        "minimum_public_output": 0.9860760661
+       "path": "p24c4096_agent_stock/board_pos4095.json",
+       "sha256": "7ac8267ab03f3ea40c87aa645a88460b49121a971f0d569efa3047ceed698c24",
+       "provides": "the last-valid-position single-step record"
       }
+     ]
+    }
+   },
+   "executor_sha256": "cef4edb2ca71a3fd3b2f7ef9612d8090fb25fe95a19c465cd312383cf76a0374",
+   "measured": "2026-08-17, one board session, all three profiles, same protocol",
+   "steady_state_p50_ms": {
+    "prepare": 1.38,
+    "transformer": 102.129,
+    "kv": 2.664,
+    "head": 20.685,
+    "argmax": 0.995,
+    "total": 127.96
+   },
+   "steady_state_p95_ms": {
+    "total": 129.652
+   },
+   "gate_reported": {
+    "scope": "48 scored greedy-oracle generated tokens",
+    "total_p50_ms": 127.96,
+    "total_p95_ms": 129.652,
+    "transformer_p50_ms": 102.129,
+    "tokens_per_second": 7.815
+   },
+   "tokens_per_second": {
+    "steady_state": 7.815
+   },
+   "gain_over_previous": {
+    "previous_total_ms": 153.202,
+    "previous_tokens_per_second": 6.53,
+    "percent": 19.7
+   },
+   "mechanism": {
+    "retained_workspace_bytes": 103104512,
+    "transformer_saving_ms": 27.57,
+    "effective_avoided_bandwidth_gb_s": 3.74,
+    "note": "the executor retains the workspace input across executes; the saving is one full workspace write per step and scales with the context"
+   },
+   "prompt_ingestion_ms_per_token": 106.28,
+   "tokens_identical_to_qualified_baseline": true,
+   "greedy_oracle": "48/48 across the same 3 prompts",
+   "eos_probe": {
+    "generated": [
+     242,
+     39,
+     220,
+     608,
+     4219,
+     357,
+     242,
+     39,
+     130073
+    ],
+    "matches_fp64_reference": false,
+    "reference": [
+     242,
+     39,
+     220,
+     608,
+     4219,
+     357,
+     242,
+     39,
+     35,
+     1
+    ],
+    "note": "the FP64 reference emits '.' (35) then EOS (1); see release/contexts/strict-eos-oracle.md"
+   },
+   "evidence": {
+    "in_repo": false,
+    "files": [
+     {
+      "path": "unified_elf_20260817/oracle3_v2_c4096.json",
+      "sha256": "bc2fae894047135f37768be19e4298b0581c3d740af1cf9fe82935e33e68ab97",
+      "provides": "3-prompt resident oracle, phase records"
+     },
+     {
+      "path": "unified_elf_20260817/eos_v2_c4096.json",
+      "sha256": "d0afad3c9b2a168816afdec4b55c06d96379b63e90cdf6c9b987632264bd88ce",
+      "provides": "EOS probe"
+     }
+    ],
+    "source_record": "MINICPM5_CONTEXT4096_QUALIFICATION.json",
+    "source_sha256": "527a60e4471a534ab5e0172f0afe5a434d2e250cc3719ccfdc5cc612c1bc134b"
+   },
+   "position_zero_ms": {
+    "transformer": 86.403,
+    "head_execute": 20.422,
+    "total": 109.522,
+    "with_prompt_head_skip": 88.105,
+    "note": "all three profiles bootstrap position zero on the same frozen ctx1024 prefill.om; ctx4096 and ctx8192 agree to 0.39 ms, which is the shared handle showing through. with_prompt_head_skip is derived by removing head and argmax, which the runtime skips on non-terminal teacher-forced prompt positions"
+   },
+   "tail": {
+    "position": 4095,
+    "total_ms": 327.91,
+    "phase_ms": {
+     "prepare": 8.005,
+     "transformer": 294.454,
+     "kv": 3.755,
+     "head": 20.673,
+     "argmax": 1.024
+    },
+    "note": "single-step run after model load; head and argmax are unchanged, so the inflation is attention over the full window plus first-step warm-up, which the evidence cannot separate"
+   }
+  },
+  {
+   "profile": "ctx8192",
+   "context": 8192,
+   "prefill_window": 1024,
+   "status": "pending",
+   "contract": "mixed prefill window (position zero on the frozen ctx1024 prefill.om)",
+   "runtime_mode": "resident packed K/V, retain-input v1 executor (ELF cef4edb2, supersedes zero-once v2_352; measured parity 167.266 ms / 5.9785 tok/s, binding evidence scratchpad/c8192_retain_ab_20260815/binding/)",
+   "steady_state_scope": "67 pooled steps at position >= 1 across the same 3 prompts, one board session for all three profiles",
+   "steady_state_steps": 67,
+   "gate_record": "release/contexts/ctx8192.qualification.json",
+   "superseded_pre_unification": {
+    "reason": "measured on the executor that v0.1.0 pinned; superseded by the retain-input unified executor bound in v0.2.0",
+    "steady_state_p50_ms": {
+     "prepare": 2.929,
+     "transformer": 139.851,
+     "kv": 2.694,
+     "head": 20.666,
+     "argmax": 0.989,
+     "total": 167.113
+    },
+    "steady_state_p95_ms": null,
+    "gate_reported": {
+     "scope": "16-token cache-policy A/B run of the adopted zero-once candidate",
+     "total_p50_ms": 167.112812,
+     "transformer_p50_ms": 139.85125,
+     "tokens_per_second": 5.983982
+    },
+    "tokens_per_second": {
+     "steady_state": 5.98,
+     "oracle_pooled": 6.036,
+     "legacy_cached_oracle_pooled": 4.586
+    },
+    "position_zero_ms": {
+     "transformer": 85.934,
+     "total": 109.093,
+     "with_prompt_head_skip": 87.849,
+     "note": "the ~86 ms transformer time matches ctx4096 exactly, confirming both contexts bootstrap on the same ctx1024-ABI prefill handle; the head skip removes head and argmax entirely on non-terminal teacher-forced prompt positions"
+    },
+    "tail": {
+     "position": 8191,
+     "total_ms": 479.949,
+     "legacy_total_ms": 574.972,
+     "phase_ms": {
+      "prepare": 14.349,
+      "transformer": 433.119,
+      "kv": 10.221,
+      "head": 21.248,
+      "argmax": 1.011
+     },
+     "note": "same caveat as ctx4096; attention spans the full 8192-entry window"
+    },
+    "evidence": {
+     "in_repo": false,
+     "source_record": "MINICPM5_CONTEXT8192_QUALIFICATION.json",
+     "source_sha256": "14cd2620a3c0dfaf48692f6a2ec2684745611e1693c635dcae549f643a91739b",
+     "files": [
+      {
+       "path": "p24c8192_agent_stock/board_zero_once_v2_352_16.json",
+       "sha256": "e6c14f285c128c51ac9ca9a627f3fe60abd1012423e254dcc9e9829a92c2ca89",
+       "provides": "adopted-mode steady-state and position-zero phase records"
+      },
+      {
+       "path": "p24c8192_agent_stock/board_zero_once_v2_352_oracle3.json",
+       "sha256": "053b79df5caed8faae6cfd57cebc5e0cbef4a021efd1c565df9f1a6892e674c2",
+       "provides": "pooled 3-prompt oracle timing for the adopted mode"
+      },
+      {
+       "path": "p24c8192_agent_stock/board_zero_once_v2_352_pos8191.json",
+       "sha256": "60fc8e0a6563e4aa7b5611c24bb3a3b954fb0c4b460cc16590b151c82101c2bc",
+       "provides": "the last-valid-position single-step record"
+      },
+      {
+       "path": "p24c8192_agent_stock/board_pos8191.json",
+       "sha256": "73d20576800ce86e2d9e0903779100f8eb6ea963c412e3028042df7b13dc5c19",
+       "provides": "the legacy-mode last-position record"
+      }
+     ]
+    }
+   },
+   "executor_sha256": "cef4edb2ca71a3fd3b2f7ef9612d8090fb25fe95a19c465cd312383cf76a0374",
+   "measured": "2026-08-17, one board session, all three profiles, same protocol",
+   "steady_state_p50_ms": {
+    "prepare": 1.363,
+    "transformer": 139.877,
+    "kv": 2.673,
+    "head": 20.7,
+    "argmax": 0.994,
+    "total": 165.714
+   },
+   "steady_state_p95_ms": {
+    "total": 167.381
+   },
+   "gate_reported": {
+    "scope": "48 scored greedy-oracle generated tokens",
+    "total_p50_ms": 165.714,
+    "total_p95_ms": 167.381,
+    "transformer_p50_ms": 139.877,
+    "tokens_per_second": 6.035
+   },
+   "tokens_per_second": {
+    "steady_state": 6.035
+   },
+   "gain_over_previous": {
+    "previous_total_ms": 218.011,
+    "previous_tokens_per_second": 4.587,
+    "percent": 31.6
+   },
+   "mechanism": {
+    "retained_workspace_bytes": 206127104,
+    "transformer_saving_ms": -0.03,
+    "effective_avoided_bandwidth_gb_s": -7927.97,
+    "note": "the executor retains the workspace input across executes; the saving is one full workspace write per step and scales with the context"
+   },
+   "prompt_ingestion_ms_per_token": 144.02,
+   "tokens_identical_to_qualified_baseline": true,
+   "greedy_oracle": "48/48 across the same 3 prompts",
+   "eos_probe": {
+    "generated": [
+     242,
+     39,
+     220,
+     608,
+     4219,
+     357,
+     242,
+     39,
+     35,
+     1
+    ],
+    "matches_fp64_reference": true,
+    "reference": [
+     242,
+     39,
+     220,
+     608,
+     4219,
+     357,
+     242,
+     39,
+     35,
+     1
+    ],
+    "note": "the FP64 reference emits '.' (35) then EOS (1); see release/contexts/strict-eos-oracle.md"
+   },
+   "evidence": {
+    "in_repo": false,
+    "files": [
+     {
+      "path": "unified_elf_20260817/oracle3_v2_c8192.json",
+      "sha256": "15cad3b17931dd524251ea07be7036b0578b34e1effad87d293553675c2e1495",
+      "provides": "3-prompt resident oracle, phase records"
+     }
+    ],
+    "source_record": "MINICPM5_CONTEXT8192_QUALIFICATION.json",
+    "source_sha256": "14cd2620a3c0dfaf48692f6a2ec2684745611e1693c635dcae549f643a91739b"
+   },
+   "position_zero_ms": {
+    "transformer": 86.012,
+    "head_execute": 20.417,
+    "total": 109.15,
+    "with_prompt_head_skip": 87.739,
+    "note": "all three profiles bootstrap position zero on the same frozen ctx1024 prefill.om; ctx4096 and ctx8192 agree to 0.39 ms, which is the shared handle showing through. with_prompt_head_skip is derived by removing head and argmax, which the runtime skips on non-terminal teacher-forced prompt positions"
+   },
+   "tail": {
+    "position": 8191,
+    "total_ms": 479.949,
+    "legacy_total_ms": 574.972,
+    "phase_ms": {
+     "prepare": 14.349,
+     "transformer": 433.119,
+     "kv": 10.221,
+     "head": 21.248,
+     "argmax": 1.011
+    },
+    "note": "same caveat as ctx4096; attention spans the full 8192-entry window"
+   }
+  }
+ ],
+ "executor_mode_ab": {
+  "context": 8192,
+  "workload": "one 2-token prompt, 16 generated tokens, identical token ids across every mode",
+  "token_identity": "all five modes produced byte-identical position-1 raw outputs and the same 16 generated token ids, so this table compares cost only",
+  "modes": [
+   {
+    "mode": "cached",
+    "total_p50_ms": 219.303,
+    "tokens_per_second": 4.56,
+    "phase_p50_ms": {
+     "prepare": 3.004,
+     "transformer": 194.536,
+     "kv": 0.432,
+     "head": 20.392,
+     "argmax": 1.004
+    },
+    "verdict": "baseline",
+    "note": "every handle memory-cached; slow legacy transformer path",
+    "evidence_sha256": "7221a1464e41a16e6d4ea70e6229aee91d25971b03c9468b844c507f5345f24c"
+   },
+   {
+    "mode": "nocache",
+    "total_p50_ms": 222.344,
+    "tokens_per_second": 4.5,
+    "phase_p50_ms": {
+     "prepare": 2.864,
+     "transformer": 171.247,
+     "kv": 2.678,
+     "head": 20.388,
+     "argmax": 25.214
+    },
+    "verdict": "rejected",
+    "note": "uncaching speeds the transformer by 23 ms but costs 24 ms in argmax; net slowest",
+    "evidence_sha256": "bfbb8f4cc392606b972dcceeeea762ac90aa52acb471111c76e20fb2d5f773c1"
+   },
+   {
+    "mode": "per-model-mixed",
+    "total_p50_ms": 198.567,
+    "tokens_per_second": 5.036,
+    "phase_p50_ms": {
+     "prepare": 2.944,
+     "transformer": 171.303,
+     "kv": 2.689,
+     "head": 20.665,
+     "argmax": 0.996
+    },
+    "verdict": "superseded",
+    "note": "uncached transformer with a cached argmax handle; isolates that the nocache penalty was entirely in argmax",
+    "evidence_sha256": "e46b6c52216618f4aed4783bdc643d88e80c164da119f47cfe7da6ab2573684b"
+   },
+   {
+    "mode": "zero-once",
+    "total_p50_ms": 167.112812,
+    "tokens_per_second": 5.984,
+    "phase_p50_ms": {
+     "prepare": 2.929,
+     "transformer": 139.851,
+     "kv": 2.694,
+     "head": 20.666,
+     "argmax": 0.989
+    },
+    "verdict": "adopted",
+    "note": "v2_352 zero-once executor candidate; 23.8% faster than the cached baseline",
+    "evidence_sha256": "e6c14f285c128c51ac9ca9a627f3fe60abd1012423e254dcc9e9829a92c2ca89"
+   },
+   {
+    "mode": "promptskip+zero-once",
+    "total_p50_ms": 167.282,
+    "tokens_per_second": 5.978,
+    "phase_p50_ms": {
+     "prepare": 2.93,
+     "transformer": 139.865,
+     "kv": 2.694,
+     "head": 20.666,
+     "argmax": 0.989
+    },
+    "verdict": "adopted",
+    "note": "steady state is unchanged by design; the gain is at prompt positions only, where the head and argmax are skipped (109.093 -> 87.849 ms at position 0)",
+    "evidence_sha256": "5ab6b15bdfc57f2d973655b16ed1abd2eb2138323e7828a552d12fad8cfc76fb"
+   }
+  ],
+  "scope": "cache-policy A/B of the pre-unification executor family; the adopted zero-once mode is superseded by the retain-input unified executor, which measures 165.714 ms / 6.034 tok/s on the same profile"
+ },
+ "ttft": {
+  "definition": "time to first token: wall time from request start until the first generated token, i.e. every prompt-ingestion step summed. Position 0 runs on the prefill handle, positions 1..N-1 run on the decode handle one token at a time, and the head plus argmax run once at the last prompt position. Model load time is excluded; it is reported separately as a cold-start cost.",
+  "why_decode_dominates": "the prefill handle and the vocabulary head each execute exactly once per request, while the decode handle executes N-1 times for an N-token prompt. Beyond a handful of prompt tokens, TTFT is almost entirely decode-handle time, which is why the wide-block prefill planner (S16/S32/S128) targets the decode side rather than a per-context prefill binary.",
+  "model": {
+   "formula": "ttft_ms ~= position_zero_total_ms + (prompt_tokens - 1) * decode_step_total_ms",
+   "validated_against_measurement": [
+    {
+     "case": "ctx128 bucket, 121 tokens",
+     "model_ms": 11509.6,
+     "measured_ms": 11495.294,
+     "error_percent": 0.12
+    },
+    {
+     "case": "ctx4096, 12 tokens",
+     "model_ms": 1795.8,
+     "measured_ms": 1796.246,
+     "error_percent": -0.02
+    },
+    {
+     "case": "ctx8192 legacy, 12 tokens",
+     "model_ms": 2511.7,
+     "measured_ms": 2511.252,
+     "error_percent": 0.02
+    },
+    {
+     "case": "ctx8192 zero-once, 12 tokens",
+     "model_ms": 1931.3,
+     "measured_ms": 1931.855,
+     "error_percent": -0.03
+    }
+   ],
+   "status": "the formula reproduces every measured point to within 0.12%, but it is a model; a projected long-prompt TTFT is not a measurement and is never reported as one below"
+  },
+  "measured": [
+   {
+    "profile": "ctx1024",
+    "runtime": "2026-08-09 three-handle acceptance runtime, before the resident-K/V and head-skip refresh; its decode step was 116-123 ms rather than today's 105.66 ms, so these are upper bounds for the shipped runtime",
+    "points": [
+     {
+      "prompt_tokens": 5,
+      "ttft_ms": 831.445,
+      "prompt": "1+1 equals"
+     },
+     {
+      "prompt_tokens": 6,
+      "ttft_ms": 965.434,
+      "prompt": "The capital of France is"
+     },
+     {
+      "prompt_tokens": 7,
+      "ttft_ms": 1064.241,
+      "prompt": "def add(a, b):"
+     },
+     {
+      "prompt_tokens": 9,
+      "ttft_ms": 1312.655,
+      "prompt": "Chinese prompt"
+     },
+     {
+      "prompt_tokens": 12,
+      "ttft_ms": 1639.046,
+      "prompt": "1, 2, 3, 4,"
+     }
+    ],
+    "evidence": [
+     {
+      "path": "release_3handle/reports/e2e_oracle3.json",
+      "sha256": "eaa485388013efad52485bcd379e3eac133022cc9d5a03a04ce29dd008abd639"
+     },
+     {
+      "path": "release_3handle/reports/e2e_chat2.json",
+      "sha256": "b7dcfdd7783080c9fb6618ee40f3e21e18a27786184820bb63246157c2f258b5"
+     }
     ]
+   },
+   {
+    "profile": "ctx4096",
+    "runtime": "mixed prefill window, resident packed K/V, no head skip",
+    "points": [
+     {
+      "prompt_tokens": 5,
+      "ttft_ms": 722.768,
+      "prompt": "1+1 equals"
+     },
+     {
+      "prompt_tokens": 6,
+      "ttft_ms": 880.953,
+      "prompt": "The capital of France is"
+     },
+     {
+      "prompt_tokens": 7,
+      "ttft_ms": 1043.961,
+      "prompt": "def add(a, b):"
+     },
+     {
+      "prompt_tokens": 12,
+      "ttft_ms": 1796.246,
+      "prompt": "1, 2, 3, 4,"
+     }
+    ],
+    "evidence": [
+     {
+      "path": "p24c4096_agent_stock/board_oracle3.json",
+      "sha256": "a3748e82aa25bc77b269cf51743b140edbbe8c4c7d0b43734e780b76b04fed53"
+     },
+     {
+      "path": "p24c4096_agent_stock/board_eos.json",
+      "sha256": "39a08c53fafc306835e7abf4c2263dbfe501f090ef0a3601bde80310c8c41df9"
+     }
+    ]
+   },
+   {
+    "profile": "ctx8192",
+    "runtime": "mixed prefill window; both the legacy cached executor and the adopted zero-once v2_352 candidate",
+    "points": [
+     {
+      "prompt_tokens": 5,
+      "ttft_ms": 983.573,
+      "prompt": "1+1 equals",
+      "mode": "legacy cached"
+     },
+     {
+      "prompt_tokens": 6,
+      "ttft_ms": 1206.344,
+      "prompt": "The capital of France is",
+      "mode": "legacy cached"
+     },
+     {
+      "prompt_tokens": 6,
+      "ttft_ms": 946.248,
+      "prompt": "The capital of France is",
+      "mode": "zero-once"
+     },
+     {
+      "prompt_tokens": 7,
+      "ttft_ms": 1424.957,
+      "prompt": "def add(a, b):",
+      "mode": "legacy cached"
+     },
+     {
+      "prompt_tokens": 7,
+      "ttft_ms": 1110.582,
+      "prompt": "def add(a, b):",
+      "mode": "zero-once"
+     },
+     {
+      "prompt_tokens": 12,
+      "ttft_ms": 2511.252,
+      "prompt": "1, 2, 3, 4,",
+      "mode": "legacy cached"
+     },
+     {
+      "prompt_tokens": 12,
+      "ttft_ms": 1931.855,
+      "prompt": "1, 2, 3, 4,",
+      "mode": "zero-once"
+     }
+    ],
+    "evidence": [
+     {
+      "path": "p24c8192_agent_stock/board_oracle3.json",
+      "sha256": "65c7261e9f30b6e6528b3e9a5323a49f41d41a8e4e565820c089ef6b38119e82"
+     },
+     {
+      "path": "p24c8192_agent_stock/board_zero_once_v2_352_oracle3.json",
+      "sha256": "053b79df5caed8faae6cfd57cebc5e0cbef4a021efd1c565df9f1a6892e674c2"
+     },
+     {
+      "path": "p24c8192_agent_stock/board_eos.json",
+      "sha256": "0918365c977795c5717767cb686e61c047f088938592b87d500acccace13a084"
+     }
+    ]
+   },
+   {
+    "profile": "ctx128-bucket",
+    "runtime": "short-context decode bucket with the ctx1024 prefill handle at position 0; not a published runtime profile, included because it carries the only long-prompt TTFT measured anywhere",
+    "points": [
+     {
+      "prompt_tokens": 5,
+      "ttft_ms": 490.92,
+      "prompt": "1+1 equals"
+     },
+     {
+      "prompt_tokens": 6,
+      "ttft_ms": 585.358,
+      "prompt": "The capital of France is"
+     },
+     {
+      "prompt_tokens": 9,
+      "ttft_ms": 873.902,
+      "prompt": "Chinese prompt"
+     },
+     {
+      "prompt_tokens": 121,
+      "ttft_ms": 11495.294,
+      "prompt": "121-token boundary probe",
+      "mean_ms_per_prompt_position": 95.0
+     }
+    ],
+    "evidence": [
+     {
+      "path": "p24c128_shipping/board_reports/c128_shipping_boundary.json",
+      "sha256": "fdd4e00f3164dd00e80a0bd90d47418a3d3729b50909519b7aa6e3784c1958a0"
+     },
+     {
+      "path": "p24c128_shipping/board_reports/c128_shipping_oracle3.json",
+      "sha256": "86db1ff88ae3d6da90830193714e2e6987623dd5e8e27e898099abc71fb3bd02"
+     },
+     {
+      "path": "p24c128_shipping/board_reports/c128_shipping_eos_zh.json",
+      "sha256": "3d70ed3610cfcd37f3c8527bec54196292f5b23491f61ea54a24633d3ee4901b"
+     }
+    ]
+   }
+  ],
+  "prompt_head_skip": {
+   "claim": "skipping the vocabulary head and argmax on non-terminal prompt positions removes 21.2 ms per ingested token",
+   "measured_scope": "a 2-token prompt on ctx8192: 260.885 ms with the skip against 282.159 ms without, a 21.27 ms difference concentrated at position 0 (87.849 ms against 109.093 ms)",
+   "evidence": [
+    {
+     "path": "p24c8192_agent_stock/board_promptskip_zero_once_16.json",
+     "sha256": "5ab6b15bdfc57f2d973655b16ed1abd2eb2138323e7828a552d12fad8cfc76fb"
+    },
+    {
+     "path": "p24c8192_agent_stock/board_zero_once_v2_352_16.json",
+     "sha256": "e6c14f285c128c51ac9ca9a627f3fe60abd1012423e254dcc9e9829a92c2ca89"
+    }
+   ],
+   "long_prompt_status": "not measured; the source record marks its own long-prompt figure measured_long_prompt=false and accepted_as_long_prompt_qualification=false"
+  },
+  "unbound_prose_claims": {
+   "note": "these figures appear in README, CHANGELOG, the routing doc and the v0.1.0 release notes but have no retrievable per-step record anywhere; they were produced live on the board and only summarized. They are reproduced here as prose provenance, not as board-bound evidence, and no gate depends on them.",
+   "claims": [
+    "a rebased 810-token cold request fell from 86.70 s to 69.45 s (19.89%) under prompt head skip",
+    "a 643-token resident-prefix hit reduced the same request to 14.61 s, restoring the prefix in 7.15 ms"
+   ],
+   "resolution": "re-run both on the board with the report written to disk, then promote them into the measured table above"
   },
   "not_measured": [
-    "per-layer or per-kernel NPU breakdown: only the five host-observed phases exist",
-    "KV snapshot hydration bytes and time at the tail positions: no such field is recorded",
-    "separation of first-step warm-up from tail-position cost: the tail runs execute exactly one step",
-    "ctx128: no board performance run exists",
-    "executor-mode A/B at ctx1024 or ctx4096: the five-mode comparison was run at ctx8192 only",
-    "prompts longer than the prefill window under the mixed contract: every recorded run used 2-13 token prompts"
+   "long-prompt TTFT for ctx1024, ctx4096 and ctx8192: the largest measured prompt on any published profile is 12 tokens",
+   "TTFT with a resident-prefix hit or a fixed-prefix snapshot: no run with those metrics was written to disk",
+   "TTFT with wide prefill blocks (S16/S32/S128): only strict S1 is enabled in the qualified release",
+   "cold-start model load is excluded from every number above; it was 2.6-12.9 s across the recorded runs"
+  ],
+  "measured_unified_executor": {
+   "measured": "2026-08-17",
+   "prompt_ingestion_ms_per_token": {
+    "ctx1024": 79.49,
+    "ctx4096": 106.28,
+    "ctx8192": 144.02
+   },
+   "derivation": "steady total minus head minus argmax; the head is skipped on non-terminal prompt positions",
+   "cross_check": "ctx1024 gives 79.49 ms against an independent gate-1 cold-prefill measurement of 79.570 ms, a 0.10% agreement",
+   "modeled_ttft_s": {
+    "ctx1024": {
+     "47": 3.77,
+     "128": 10.2,
+     "512": 40.73,
+     "1023": 81.35
+    },
+    "ctx4096": {
+     "47": 5.0,
+     "128": 13.61,
+     "512": 54.42,
+     "4095": 435.22
+    },
+    "ctx8192": {
+     "47": 6.73,
+     "128": 18.4,
+     "512": 73.7,
+     "8191": 589.73
+    }
+   },
+   "status": "the per-token ingestion cost is measured; the multi-token totals are the model"
+  }
+ },
+ "gate_binding": {
+  "policy": "a performance number is publishable only alongside the numeric gate that the same artifact passed; throughput never substitutes for a cosine or token gate",
+  "entries": [
+   {
+    "profile": "ctx1024",
+    "gate_record": "release/v0.1.0/qualification.json",
+    "decode_om_sha256": "59d6bfc9f66edbacc90896f723320041fc6c352d85306054e090b13ecaf774b1",
+    "prefill_om_sha256": "fea09d294513839ccab846050193def475859f4352e2cb3fad7c2f8f1dfa4536",
+    "gate_verdict": "PASS",
+    "minimum_public_output": 0.996646042546888
+   },
+   {
+    "profile": "ctx4096",
+    "gate_record": "release/contexts/ctx4096.qualification.json",
+    "decode_om_sha256": "9f456c6b5d716fc97d9be936767e0464eb9868ab3abcd172163139c7bd05254e",
+    "prefill_om_sha256": "fea09d294513839ccab846050193def475859f4352e2cb3fad7c2f8f1dfa4536",
+    "gate_verdict": "PASS",
+    "minimum_public_output": 0.9908199813
+   },
+   {
+    "profile": "ctx8192",
+    "gate_record": "release/contexts/ctx8192.qualification.json",
+    "decode_om_sha256": "1c1c345deddf64e3af3b3c89bee07aba65035620d9e08d69b11b6c9aeb233c3d",
+    "prefill_om_sha256": "fea09d294513839ccab846050193def475859f4352e2cb3fad7c2f8f1dfa4536",
+    "gate_verdict": "CANDIDATE_CALIBRATION_NOT_NATIVE",
+    "minimum_public_output": 0.9860760661
+   }
   ]
+ },
+ "not_measured": [
+  "per-layer or per-kernel NPU breakdown: only the five host-observed phases exist",
+  "KV snapshot hydration bytes and time at the tail positions: no such field is recorded",
+  "separation of first-step warm-up from tail-position cost: the tail runs execute exactly one step",
+  "ctx128: no board performance run exists",
+  "executor-mode A/B at ctx1024 or ctx4096: the five-mode comparison was run at ctx8192 only",
+  "prompts longer than the prefill window under the mixed contract: every recorded run used 2-13 token prompts"
+ ]
 }

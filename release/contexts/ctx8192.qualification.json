@@ -28,34 +28,109 @@
   "numeric_gate": {
     "cosine_threshold_exclusive": 0.98,
     "public_outputs": [
-      {"position": 1, "runner": "libinstsim", "next_hidden": 0.9968204464, "packed_k": 0.9992459681, "packed_v": 0.9972536798},
-      {"position": 1024, "runner": "libinstsim", "next_hidden": 0.9929025472, "packed_k": 0.9987982485, "packed_v": 0.9936169709},
-      {"position": 2048, "runner": "libinstsim", "next_hidden": 0.9925598089, "packed_k": 0.9991322415, "packed_v": 0.9970511748},
-      {"position": 4096, "runner": "libinstsim", "next_hidden": 0.9924750262, "packed_k": 0.998140204, "packed_v": 0.9941122222},
-      {"position": 8191, "runner": "libinstsim", "next_hidden": 0.9876303165, "packed_k": 0.9956254988, "packed_v": 0.9860760661},
-      {"position": 1, "runner": "board", "next_hidden": 0.9978582968, "packed_k": 0.9991720989, "packed_v": 0.9972643787},
-      {"position": 8191, "runner": "board", "next_hidden": 0.9876303165, "packed_k": 0.9956254988, "packed_v": 0.9860760661}
+      {
+        "position": 1,
+        "runner": "libinstsim",
+        "next_hidden": 0.9968204464,
+        "packed_k": 0.9992459681,
+        "packed_v": 0.9972536798
+      },
+      {
+        "position": 1024,
+        "runner": "libinstsim",
+        "next_hidden": 0.9929025472,
+        "packed_k": 0.9987982485,
+        "packed_v": 0.9936169709
+      },
+      {
+        "position": 2048,
+        "runner": "libinstsim",
+        "next_hidden": 0.9925598089,
+        "packed_k": 0.9991322415,
+        "packed_v": 0.9970511748
+      },
+      {
+        "position": 4096,
+        "runner": "libinstsim",
+        "next_hidden": 0.9924750262,
+        "packed_k": 0.998140204,
+        "packed_v": 0.9941122222
+      },
+      {
+        "position": 8191,
+        "runner": "libinstsim",
+        "next_hidden": 0.9876303165,
+        "packed_k": 0.9956254988,
+        "packed_v": 0.9860760661
+      },
+      {
+        "position": 1,
+        "runner": "board",
+        "next_hidden": 0.9978582968,
+        "packed_k": 0.9991720989,
+        "packed_v": 0.9972643787
+      },
+      {
+        "position": 8191,
+        "runner": "board",
+        "next_hidden": 0.9876303165,
+        "packed_k": 0.9956254988,
+        "packed_v": 0.9860760661
+      }
     ],
     "minimum_public_output": 0.9860760661,
     "board_tail_byte_exact_position": 8191
   },
   "gates": {
-    "greedy_oracle": {"prompts": 3, "tokens_exact": 48, "tokens_total": 48},
+    "greedy_oracle": {
+      "prompts": 3,
+      "tokens_exact": 48,
+      "tokens_total": 48
+    },
     "eos": {
-      "token_sequence_exact": false,
+      "token_sequence_exact": true,
       "finish_reason": "eos",
-      "detail": "board tail diverges from the strict FP64 oracle at the ninth generated token"
+      "judged_against": "fp64 greedy continuation of the pinned checkpoint",
+      "reference": [
+        242,
+        39,
+        220,
+        608,
+        4219,
+        357,
+        242,
+        39,
+        35,
+        1
+      ],
+      "generated": [
+        242,
+        39,
+        220,
+        608,
+        4219,
+        357,
+        242,
+        39,
+        35,
+        1
+      ],
+      "detail": "re-derived 2026-08-17; the earlier expectation was ctx1024's board output, not the reference. See strict-eos-oracle.md"
     },
     "context_boundary": {
       "position": 8192,
       "rejected_before_model_load": true,
       "stderr_artifact_bound": false
     },
-    "board_load": {"handles": 3},
+    "board_load": {
+      "handles": 3
+    },
     "performance": {
-      "total_p50_ms": 167.113,
-      "tokens_per_second": 5.984,
-      "mode": "zero-once resident candidate"
+      "total_p50_ms": 165.714,
+      "tokens_per_second": 6.035,
+      "mode": "retain-input unified executor cef4edb2",
+      "measured": "2026-08-17",
+      "total_p95_ms": 167.381
     },
     "calibration": {
       "mode": "source-donor-zero-extend",
@@ -68,7 +143,8 @@
       "slice": "layer12-packed-v",
       "cosine": 0.9614208265
     },
-    "note": "seven per-layer V slices sit below the gate at the last valid position and one at position 4096; public outputs stay strictly above it, with thin headroom on packed_v at the tail"
+    "note": "seven per-layer V slices sit below the gate at the last valid position and one at position 4096; public outputs stay strictly above it, with thin headroom on packed_v at the tail",
+    "eos_history": "carried FAIL_STRICT_SEQUENCE_MISMATCH until 2026-08-17; the failure was in the expectation, not the artifact"
   },
   "evidence": {
     "source_record": "MINICPM5_CONTEXT8192_QUALIFICATION.json",
@@ -78,9 +154,9 @@
   "verdict": {
     "public_output_numeric": "PASS",
     "greedy_exact": "PASS",
-    "eos": "FAIL_STRICT_SEQUENCE_MISMATCH",
+    "eos": "PASS",
     "context_boundary": "PASS_JSON_FIELDS_ONLY",
     "board_load": "PASS",
-    "overall": "CANDIDATE_STRICT_EOS_FAIL"
+    "overall": "CANDIDATE_CALIBRATION_NOT_NATIVE"
   }
 }

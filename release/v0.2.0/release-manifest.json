@@ -1,0 +1,125 @@
+{
+ "schema": "pico.minicpm5.release.v1",
+ "release": "v0.2.0",
+ "source": {
+  "package": "pico-minicpm5",
+  "version": "0.2.0"
+ },
+ "model": {
+  "repository": "openbmb/MiniCPM5-1B",
+  "revision": "4e9de7a0778dc1c362e983e6858f0e77542cbdca",
+  "relationship": "generated artifacts are derived from separately downloaded model weights"
+ },
+ "target": {
+  "soc": "Hi3403",
+  "npu_arch": "V101",
+  "context": 1024
+ },
+ "artifacts": {
+  "models/decode.om": {
+   "role": "decode-transformer",
+   "bytes": 686997372,
+   "sha256": "59d6bfc9f66edbacc90896f723320041fc6c352d85306054e090b13ecaf774b1",
+   "distribution": "optional-derived-model-asset"
+  },
+  "models/prefill.om": {
+   "role": "position-zero-transformer",
+   "bytes": 686999901,
+   "sha256": "fea09d294513839ccab846050193def475859f4352e2cb3fad7c2f8f1dfa4536",
+   "distribution": "optional-derived-model-asset"
+  },
+  "models/head_flat.om": {
+   "role": "vocabulary-head",
+   "bytes": 202651666,
+   "sha256": "fd6675f4aad9d7244471afc637f4964c79a7504b2c73a350985f2d807105330e",
+   "distribution": "optional-derived-model-asset"
+  },
+  "assets/token_embedding.f16.bin": {
+   "role": "token-embedding",
+   "bytes": 401080320,
+   "sha256": "5a93b589f0c5920021c95e04327c0771da2721d8eec2dd7ac1b283aa0d3b7df5",
+   "distribution": "optional-derived-model-asset"
+  },
+  "assets/tokenizer.json": {
+   "role": "tokenizer",
+   "bytes": 9894271,
+   "sha256": "3e065a558a034185fe299917b398685c1facd0169a9eea1e629eb30c171fed81",
+   "distribution": "optional-upstream-model-asset"
+  }
+ },
+ "abi": {
+  "handles": 3,
+  "transformer_public_inputs": 5,
+  "transformer_runtime_inputs": 7,
+  "transformer_outputs": 3
+ },
+ "qualification": {
+  "cosine_threshold_exclusive": 0.98,
+  "prefill_minimum_public_output": 0.996646042546888,
+  "decode_minimum_public_output": 0.9980232292994137,
+  "greedy_tokens_exact": 48,
+  "greedy_tokens_total": 48,
+  "tokens_per_second_range": [
+   9.9602,
+   9.9792
+  ],
+  "eos": "PASS",
+  "overall": "PASS",
+  "note": "the three ctx1024 OMs are byte-identical to v0.1.0; the throughput gain comes from the executor, not from a recompiled model"
+ },
+ "known_diagnostic": {
+  "prefill_layer2_v_slice_cosine": 0.9711191219194694,
+  "blocking_under_public_output_gate": false
+ },
+ "runtime": {
+  "application": "app/",
+  "executor_binary": {
+   "bytes": 37840,
+   "sha256": "cef4edb2ca71a3fd3b2f7ef9612d8090fb25fe95a19c465cd312383cf76a0374",
+   "distribution": "runtime-archive-only",
+   "source": "app/native/pico_persistent_acl_executor.c",
+   "source_sha256": "b43cab30268909ba7e25ac20cd7251f7702a1b5411cbac3813a00e343c0bbf9d",
+   "reproducible_build": "docs/EXECUTOR_BUILD.md",
+   "supersedes": "b58b5c2715154f8f7051d2d8fd111af41bb3cd318dbd3be86a60a0ac9a842230"
+  },
+  "board_runner_sha256": "9de36732b80f968df1e4e2d357657ca78336f4772de8f8fb0c90fcd2575f346b",
+  "agent_sha256": "b39ab7a8ccda07a572a244ac39527c22c14841f838adfdcd5d26d061cab5ce41",
+  "profile_loader_sha256": "f531e62002aa826270c0480877bade393bd1d967280c2e2b12ea0a498f32be06",
+  "resident_kv": true,
+  "tokens_per_second_range": [
+   9.9602,
+   9.9792
+  ]
+ },
+ "excluded_external_components": [
+  "checkpoint weights",
+  "ATC and DDK",
+  "libinstsim",
+  "custom-op shared libraries",
+  "proprietary board runtime libraries"
+ ],
+ "extended_contexts": {
+  "contract": "mixed prefill window: every context shares the frozen ctx1024 prefill.om and head_flat.om byte for byte; only decode.om differs",
+  "ctx4096": {
+   "status": "qualified",
+   "decode_om_sha256": "9f456c6b5d716fc97d9be936767e0464eb9868ab3abcd172163139c7bd05254e",
+   "total_p50_ms": 127.96,
+   "tokens_per_second": 7.8149,
+   "record": "release/contexts/ctx4096.qualification.json"
+  },
+  "ctx8192": {
+   "status": "candidate",
+   "decode_om_sha256": "1c1c345deddf64e3af3b3c89bee07aba65035620d9e08d69b11b6c9aeb233c3d",
+   "total_p50_ms": 165.714,
+   "tokens_per_second": 6.0345,
+   "record": "release/contexts/ctx8192.qualification.json",
+   "open_items": [
+    "donor-zero-extend calibration",
+    "Chinese oracle",
+    "memory envelope",
+    "long prompt"
+   ]
+  },
+  "distribution": "extended-context decode OMs ship as GitHub release assets, not in this repository"
+ }
+}

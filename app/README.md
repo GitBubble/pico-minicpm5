@@ -2,6 +2,11 @@
 
 [中文说明](README.zh-CN.md)
 
+<img src="../docs/media/agent-demo.svg" alt="HiAgent running on an Hi3403 board: a directly routed list_directory tool call, a deterministic context rebase, and on-device generation at 9.74 token/s" width="100%">
+
+Recorded from this directory's `agent.sh` on a real board. Waits play at
+`4.5x`; the clock at the lower right is the board's own wall time.
+
 This directory is the board-user entry point. It assumes the files from the
 GitHub `v0.1.0` release have already been copied to
 `/opt/pico-minicpm5`; no ONNX export, ATC compilation or host-side

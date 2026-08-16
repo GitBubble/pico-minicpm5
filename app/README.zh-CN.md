@@ -2,6 +2,11 @@
 
 [English](README.md)
 
+<img src="../docs/media/agent-demo.svg" alt="HiAgent 在 Hi3403 板上运行：直通路由的 list_directory 工具调用、确定性上下文 rebase、端侧 9.74 token/s 生成" width="100%">
+
+录自本目录的 `agent.sh`，真实板端会话。等待段按 `4.5x` 播放，右下角是板子
+自己的墙钟。
+
 本目录是板端用户入口。以下步骤假设 GitHub `v0.1.0` Release 中的文件已经
 复制到 `/opt/pico-minicpm5`。直接运行不需要重新导出 ONNX、不需要
 调用 ATC，也不需要在板端安装本项目的 host 构建包。

@@ -2,6 +2,14 @@
 
 [中文说明](README.zh-CN.md) · [Board demo](app/README.md) · [板端 Demo](app/README.zh-CN.md)
 
+<img src="docs/media/agent-demo.svg" alt="HiAgent running on an Hi3403 board: a directly routed list_directory tool call, a deterministic context rebase, and on-device generation at 9.74 token/s" width="100%">
+
+A real session on the board, not a mock-up. The tool call returns in `1.9 ms`
+because unambiguous read-only requests are routed without the model; the
+model-native turn then answers at `9.74 token/s` after a deterministic context
+rebase. The clock at the lower right is the board's own wall time — waits play
+at `4.5x`, output plays in real time.
+
 `pico-minicpm5` turns the pinned
 [`openbmb/MiniCPM5-1B`](https://huggingface.co/openbmb/MiniCPM5-1B)
 checkpoint into a reproducible Hi3403/PICO deployment:

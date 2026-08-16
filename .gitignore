@@ -16,3 +16,11 @@ dist/
 build/
 .DS_Store
 app/native/pico_persistent_acl_executor_contract_check
+
+# Claude session transcript dumps
+session_history.md
+
+# Local source backups; git history is the backup mechanism
+*.pre_unification_*
+*.pre_snapshot*
+*.pre_static_kv

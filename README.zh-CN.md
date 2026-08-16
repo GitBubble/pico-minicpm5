@@ -2,6 +2,13 @@
 
 [English](README.md) · [板端 Demo](app/README.zh-CN.md)
 
+<img src="docs/media/agent-demo.svg" alt="HiAgent 在 Hi3403 板上运行：直通路由的 list_directory 工具调用、确定性上下文 rebase、端侧 9.74 token/s 生成" width="100%">
+
+这是板上的真实会话，不是演示稿。工具调用 `1.9 ms` 返回，因为无歧义的只读请求
+不经过模型直接路由；随后的模型原生回合在一次确定性上下文 rebase 之后以
+`9.74 token/s` 作答。右下角是板子自己的墙钟——等待段按 `4.5x` 播放，输出段
+按真实速度播放。
+
 `pico-minicpm5` 将固定版本的
 [`openbmb/MiniCPM5-1B`](https://huggingface.co/openbmb/MiniCPM5-1B)
 转换为可复现的 Hi3403/PICO 三句柄部署：

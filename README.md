@@ -9,9 +9,9 @@ nothing is cut, so the numbers on screen are the ones the board produced.
 
 The model answers a greeting `3.2 s` after the prompt, because a turn that
 needs no tool is disclosed no tool schema. Writing a file does need one, and
-that is the slow turn: `498` prompt tokens at `79.5 ms` each, which the spinner
+that is the slow turn: `395` prompt tokens at `79.5 ms` each, which the spinner
 counts down rather than hides. The two turns after it never reach the model —
-the directory listing takes `2.1 ms` and `swish(2)` takes `0.7 ms`, computed in
+the directory listing takes `1.8 ms` and `swish(2)` takes `0.7 ms`, computed in
 Python because the model gets that particular number wrong. The listing is also
 the check on the write: `a.txt` is in it.
 

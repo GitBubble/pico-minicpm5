@@ -229,7 +229,8 @@ def test_progressive_tool_schema_selection(query: str, profile: str) -> None:
     # tool, so "clear it out" needs both the writer and the shell.
     ("帮我把 TODO 清掉", "write_shell", "write_file"),
     ("删除 a.txt", "write_shell", "run_shell"),
-    ("把 swish(2) 的结果写进 out.txt", "write", "write_file"),
+    # The calculator joins a write only when the turn computes something.
+    ("把 swish(2) 的结果写进 out.txt", "write+calc", "write_file"),
     ("启动服务", "shell", "run_shell"),
 ])
 def test_mutation_verbs_beyond_the_dictionary_form(
@@ -939,3 +940,36 @@ def test_write_file_refuses_a_directory_in_the_terms_it_was_asked(
         with pytest.raises(agent.ToolExecutionError) as raised:
             tools._write_file({"path": target, "content": "hello"})
         assert "directory" in str(raised.value)
+
+
+@pytest.mark.parametrize(("query", "computes"), [
+    ("把 hello 写进 a.txt", False),
+    ("把标题改成 A", False),
+    ("运行测试", False),
+    ("把 swish(2) 的结果写进 out.txt", True),
+    ("算一下 3^10 存到 n.txt", True),
+    ("跑一下 sigmoid(2) 并保存", True),
+])
+def test_a_mutating_turn_carries_the_calculator_only_when_it_computes(
+        query: str, computes: bool) -> None:
+    """The protection is needed exactly where a number reaches the disk.
+
+    Asked to write swish(2) to a file the model answers 1.728 against a true
+    1.7616, so the calculator has to be disclosed there. A plain write would
+    otherwise pay 67 fixed-prefix tokens, 5.3 s on ctx1024, for a tool it
+    never calls.
+    """
+    agent = _agent_module()
+    tools = agent.WorkspaceTools(Path("."))
+    profile = agent.WorkspaceTools.select_schema_profile(query)
+
+    assert ("calculate" in tools.names_for_profile(profile)) is computes
+
+
+def test_a_mutating_turn_is_not_told_where_the_workspace_is_twice() -> None:
+    """The system prompt names the workspace root; a tool that returns it is
+    35 fixed-prefix tokens for an answer the model already has."""
+    agent = _agent_module()
+    tools = agent.WorkspaceTools(Path("."))
+    for profile in ("write", "shell", "write_shell", "write+calc"):
+        assert "current_directory" not in tools.names_for_profile(profile)

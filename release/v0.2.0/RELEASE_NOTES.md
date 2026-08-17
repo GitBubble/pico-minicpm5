@@ -69,7 +69,7 @@ logits.
 
 - A recorded four-turn agent session on the project and app homepages, played
   at the speed it ran: a greeting answered in `3.2 s`, a file written under
-  explicit approval, the listing that confirms the write in `2.1 ms`, and
+  explicit approval, the listing that confirms the write in `1.8 ms`, and
   `swish(2)` computed exactly in `0.7 ms`. Nothing is sped up or cut, and the
   one slow turn reports its own remaining prompt tokens rather than hiding
   behind a spinner.

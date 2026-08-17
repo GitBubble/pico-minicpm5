@@ -1021,15 +1021,19 @@ class WorkspaceTools:
     # a tool that does not exist, four rounds running. Narrow disclosure is a
     # correctness measure before it is a latency one.
     # read_file rides along because the system prompt tells the model to
-    # inspect before changing, and calculate because a turn that writes a
-    # computed number must not compute it in the model: asked for swish(2)
-    # it answers 1.728 against a true 1.7616, and that number would be
-    # written to the file. Both are cheaper than the widening round they
-    # replace, and far cheaper than a wrong result on disk.
+    # inspect before changing, and paying 72 tokens for it beats the widening
+    # round it replaces. current_directory does not: the system prompt already
+    # names the workspace root in its second sentence, so a tool that returns
+    # it again is 35 tokens, 2.8 s, for an answer the model has been given.
     #: Tools that ask the operator on every call. Escalation widens towards
     #: fewer of these before it widens towards fewer tools.
     _PRIVILEGED = frozenset({"write_file", "run_shell"})
-    _MUTATION_BASE = ("current_directory", "read_file", "calculate")
+    _MUTATION_BASE = ("read_file",)
+    #: calculate joins a mutating turn only when that turn computes something.
+    #: It must be there when it does -- asked to write swish(2) to a file the
+    #: model answers 1.728 against a true 1.7616, and that lands on disk -- but
+    #: a plain write pays 67 tokens, 5.3 s, for a tool it never calls.
+    _MATH_SUFFIX = "+calc"
     _WRITE_SET = (*_MUTATION_BASE, "write_file")
     _SHELL_SET = (*_MUTATION_BASE, "run_shell")
     _PROFILES = {
@@ -1037,8 +1041,12 @@ class WorkspaceTools:
         "calculate": ("calculate",),
         "result_page": ("read_result_page",),
         "write": _WRITE_SET,
+        "write+calc": (*_MUTATION_BASE, "calculate", "write_file"),
         "shell": _SHELL_SET,
+        "shell+calc": (*_MUTATION_BASE, "calculate", "run_shell"),
         "write_shell": (*_MUTATION_BASE, "write_file", "run_shell"),
+        "write_shell+calc": (*_MUTATION_BASE, "calculate", "write_file",
+                             "run_shell"),
         "read_only": _READ_ONLY,
         "read_write": (*_READ_ONLY, "write_file"),
         "read_shell": (*_READ_ONLY, "run_shell"),
@@ -1188,14 +1196,15 @@ class WorkspaceTools:
         # named in "save it as pi.py" is the write target, not a referent to
         # be read, so the referent rule must not widen this branch.
         also_reads = _has_term(lowered, _READ_INTENT)
+        calc = cls._MATH_SUFFIX if _dispatched_math(text, lowered) else ""
         if needs_write and needs_shell:
-            return "all" if also_reads else "write_shell"
+            return "all" if also_reads else "write_shell" + calc
         if needs_write:
-            return "read_write" if also_reads else "write"
+            return "read_write" if also_reads else "write" + calc
         if needs_shell:
-            # calculate rides with the read set, so a shell turn that also
-            # reads keeps exact arithmetic without a second widening round.
-            return "read_shell" if also_reads else "shell"
+            # The read set carries the calculator already, so a shell turn
+            # that also reads needs no suffix.
+            return "read_shell" if also_reads else "shell" + calc
         if _has_term(lowered, _READ_INTENT):
             # A read-then-compute turn takes its numbers from the file, and
             # the read set carries the calculator for exactly that reason.

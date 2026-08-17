@@ -90,7 +90,7 @@ Thinking 默认关闭，可用 `./app/agent.sh --thinking` 启动，或在运行
 单次运行可使用 `./app/chat.sh --prompt '请用一句话解释什么是神经网络。' --max-new 32`。
 显式 `--prompt` 和 `--interactive` 继续保留旧的裸文本续写兼容模式。
 
-一套部署由两个 Release 装配而成，因为模型文件没有变化、也就没有重新上传：
+一套部署由三个 Release 装配而成，因为模型文件没有变化、也就没有重新上传：
 
 | 来源 | 内容 | 原因 |
 |---|---|---|
@@ -112,18 +112,25 @@ gh release download v0.1.0 --repo GitBubble/pico-minicpm5 \
   --pattern 'prefill.om' --pattern 'decode.om' --pattern 'head_flat.om' \
   --pattern 'token_embedding.f16.bin' --pattern 'tokenizer.json'
 
+sha256sum -c --ignore-missing SHA256SUMS
+
 tar xzf pico-minicpm5-runtime-v0.2.0.tar.gz --strip-components=1
 mkdir -p models assets
 mv prefill.om decode.om head_flat.om models/
 mv token_embedding.f16.bin tokenizer.json assets/
-sha256sum -c SHA256SUMS
 ```
 
-需要 `ctx4096` 时，再补上它的 decode OM，并在启动时选择该 profile：
+校验要在移动之前做：`SHA256SUMS` 记的是刚下载时的文件名，而且它还列了本版的
+Python 分发件与 SPDX 文档，这段配方并不下载那几个 —— 所以要加
+`--ignore-missing`。
+
+需要 `ctx4096` 时，再补上它的 decode OM，并在启动时选择该 profile。扩展上下文
+由它自己那份校验和文件覆盖，不在上面那份里：
 
 ```bash
 gh release download v0.1.0-ctx-preview --repo GitBubble/pico-minicpm5 \
-  --pattern 'decode.ctx4096.om'
+  --pattern 'decode.ctx4096.om' --pattern 'SHA256SUMS.ctx-preview'
+sha256sum -c --ignore-missing SHA256SUMS.ctx-preview
 mkdir -p models/ctx4096 && mv decode.ctx4096.om models/ctx4096/decode.om
 ./app/chat.sh --profile ctx4096
 ```

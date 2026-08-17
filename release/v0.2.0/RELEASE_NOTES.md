@@ -84,3 +84,17 @@ Long-prompt TTFT is poor. Prompt tokens are still fed in one at a time, so a
 512-token prompt costs `40.7 s` on ctx1024 and `54.4 s` on ctx4096. The
 wide-block prefill path that would amortise this is not in this release; no wide
 block has passed a numeric gate.
+
+## Where the model files are
+
+The three `ctx1024` OM files are byte-identical to `v0.1.0` and are **not
+re-uploaded here** — take `decode.om`, `prefill.om`, `head_flat.om`,
+`token_embedding.f16.bin` and `tokenizer.json` from the
+[v0.1.0 release](https://github.com/GitBubble/pico-minicpm5/releases/tag/v0.1.0).
+The extended-context decode OMs are in
+[v0.1.0-ctx-preview](https://github.com/GitBubble/pico-minicpm5/releases/tag/v0.1.0-ctx-preview).
+
+Two checksum files, both needed. `SHA256SUMS` here covers the five `ctx1024`
+files plus this release's own runtime, SPDX and Python artifacts;
+`SHA256SUMS.ctx-preview` on the preview release covers the two extended-context
+decode OMs.

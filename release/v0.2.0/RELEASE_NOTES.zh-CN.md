@@ -52,7 +52,7 @@ donor 零扩展而非原生，且中文 oracle、内存包络、长 prompt 三�
 从未被追溯到参考模型。用固定 checkpoint 以 float64 重新推导后，参考模型写下一个
 句号然后停止——这恰恰是 `ctx8192` 的输出，而 `ctx1024` 与 `ctx4096` 并非如此。
 那条"期望"是从第一个跑出来的工件记录下来的。详见
-[`release/contexts/strict-eos-oracle.md`](../contexts/strict-eos-oracle.md)。
+[`release/contexts/strict-eos-oracle.zh-CN.md`](../contexts/strict-eos-oracle.zh-CN.md)。
 
 这并不说明另外两档有缺陷：它们的 48 token oracle 全过，而参考模型在那一步也只
 以 `0.31` 个 logit 的优势选择句号。
@@ -65,7 +65,7 @@ donor 零扩展而非原生，且中文 oracle、内存包络、长 prompt 三�
   `Clip` 对 ATC 的 IFMR 量程搜索做了什么、position 0 为什么需要自己的标定 family
   （是 layer-0 的 MLP 分支，不是 attention），以及一条被广泛复述、却被它自己的
   证据推翻因而撤回的规则。
-- [`release/perf/`](../perf/README.md)：性能板现在载有 TTFT、逐上下文相位拆解、
+- [`release/perf/`](../perf/README.zh-CN.md)：性能板现在载有 TTFT、逐上下文相位拆解、
   被取代的并轨前数字，以及每一项背后的证据哈希。
 
 ## 已知限制
@@ -73,3 +73,15 @@ donor 零扩展而非原生，且中文 oracle、内存包络、长 prompt 三�
 长 prompt 的 TTFT 很差：prompt token 仍然逐个送入，512 token 的 prompt 在
 ctx1024 上需要 `40.7 s`，在 ctx4096 上需要 `54.4 s`。能摊薄这笔
 开销的宽块 prefill 路径不在本版中——目前没有任何宽块通过数值门。
+
+## 模型文件在哪里
+
+三个 `ctx1024` OM 与 `v0.1.0` 逐字节相同，**本版不再重新上传** —— 请从
+[v0.1.0 release](https://github.com/GitBubble/pico-minicpm5/releases/tag/v0.1.0)
+取 `decode.om`、`prefill.om`、`head_flat.om`、`token_embedding.f16.bin` 与
+`tokenizer.json`。扩展上下文的 decode OM 在
+[v0.1.0-ctx-preview](https://github.com/GitBubble/pico-minicpm5/releases/tag/v0.1.0-ctx-preview)。
+
+校验和有两份，缺一不可。本版的 `SHA256SUMS` 覆盖那五个 `ctx1024` 文件，以及本版
+自己的运行时、SPDX 与 Python 产物；预览版上的 `SHA256SUMS.ctx-preview` 覆盖那两个
+扩展上下文 decode OM。

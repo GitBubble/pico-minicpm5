@@ -84,7 +84,7 @@ what this release fixes at `1024` is the prefill window, not the context.
 
 ## Deploy the prebuilt Hi3403 demo
 
-A deployment is assembled from two releases, because the model files did not
+A deployment is assembled from three releases, because the model files did not
 change and are not re-uploaded:
 
 | From | What | Why |
@@ -107,18 +107,25 @@ gh release download v0.1.0 --repo GitBubble/pico-minicpm5 \
   --pattern 'prefill.om' --pattern 'decode.om' --pattern 'head_flat.om' \
   --pattern 'token_embedding.f16.bin' --pattern 'tokenizer.json'
 
+sha256sum -c --ignore-missing SHA256SUMS
+
 tar xzf pico-minicpm5-runtime-v0.2.0.tar.gz --strip-components=1
 mkdir -p models assets
 mv prefill.om decode.om head_flat.om models/
 mv token_embedding.f16.bin tokenizer.json assets/
-sha256sum -c SHA256SUMS
 ```
 
-For `ctx4096`, add its decode OM and select the profile at startup:
+Verify before moving anything: `SHA256SUMS` names the files as downloaded, and
+it also lists this release's Python distributions and SPDX document, which this
+recipe does not fetch — hence `--ignore-missing`.
+
+For `ctx4096`, add its decode OM and select the profile at startup. The extended
+contexts are covered by their own checksum file, not by the one above:
 
 ```bash
 gh release download v0.1.0-ctx-preview --repo GitBubble/pico-minicpm5 \
-  --pattern 'decode.ctx4096.om'
+  --pattern 'decode.ctx4096.om' --pattern 'SHA256SUMS.ctx-preview'
+sha256sum -c --ignore-missing SHA256SUMS.ctx-preview
 mkdir -p models/ctx4096 && mv decode.ctx4096.om models/ctx4096/decode.om
 ```
 

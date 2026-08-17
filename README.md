@@ -2,13 +2,12 @@
 
 [中文说明](README.zh-CN.md) · [Board demo](app/README.md) · [板端 Demo](app/README.zh-CN.md)
 
-<img src="docs/media/agent-demo.svg" alt="HiAgent running on an Hi3403 board: a directly routed list_directory tool call, a deterministic context rebase, and on-device generation at 9.74 token/s" width="100%">
+<img src="docs/media/board-chat.svg" alt="MiniCPM5-1B answering two questions on an Hi3403 board at 9.9 token/s" width="100%">
 
-A real session on the board, not a mock-up. The tool call returns in `1.9 ms`
-because unambiguous read-only requests are routed without the model; the
-model-native turn then answers at `9.74 token/s` after a deterministic context
-rebase. The clock at the lower right is the board's own wall time — waits play
-at `4.5x`, output plays in real time.
+A real session on the board, not a mock-up: three resident handles load in
+`7.3 s`, then the model answers at `9.91` and `9.92 token/s`. The clock at the
+lower right is the board's own wall time; waits play at `2.4x` and output plays
+in real time.
 
 `pico-minicpm5` turns the pinned
 [`openbmb/MiniCPM5-1B`](https://huggingface.co/openbmb/MiniCPM5-1B)
@@ -37,54 +36,90 @@ only as an experimental, fail-closed recovery path.
 
 ## Status
 
-The frozen `ctx1024` three-handle candidate was accepted on an Hi3403 board:
+`v0.2.0` ships three decode contexts. All three were measured on an Hi3403
+board in one session on the retain-input executor `cef4edb2…`, and all three
+produced tokens identical to their own qualified baseline.
 
-- prefill minimum public-output cosine: `0.996646`;
-- decode minimum public-output cosine: `0.998023`;
-- `48/48` greedy tokens matched the official-checkpoint FP64 oracle;
-- EOS and Chinese text paths passed;
-- optimized resident-K/V runtime: `9.42–9.48 token/s` at
-  `105.5–106.1 ms/token`, approximately `1.91x` the accepted 49-handle
-  baseline;
-- prompt-only head suppression passed a token-exact board A/B and reduced a
-  rebased 810-token cold request from `86.70 s` to `69.45 s` (`19.89%`), while
-  a 643-token resident-prefix hit reduced it further to `14.61 s`.
-- The fail-closed native-prefill planner now implements the future
-  `S128 -> S32 -> S16 -> strict S1 tail` policy and exposes its decision in
-  request reports. Only S1 is enabled in the qualified release; see
-  [the native prefill contract](docs/NATIVE_PREFILL_SCHEDULER.md).
+| Profile | p50 / token | token/s | Prompt ingestion | Status |
+|---|---:|---:|---:|---|
+| ctx1024 | 100.40 ms | **9.96** | 79.49 ms/token | qualified |
+| ctx4096 | 127.96 ms | **7.81** | 106.28 ms/token | qualified |
+| ctx8192 | 165.71 ms | **6.03** | 144.02 ms/token | pending |
 
-These are Hi3403 measurements. They are not a claim that every Hi3403 product
-configuration has been qualified. The upstream checkpoint advertises a much
-longer context; this release contract is intentionally fixed at `1024`.
+The contexts differ only in `decode.om`. Every profile bootstraps position zero
+on the same frozen `ctx1024` `prefill.om` and shares one `head_flat.om`, byte
+for byte — the mixed prefill-window contract. Their measured position-zero
+transformer times agree to `0.39 ms`, which is that contract showing up in the
+timing.
+
+What each profile passed:
+
+- `ctx1024`: prefill and decode minimum public-output cosine `0.996646` and
+  `0.998023`; `48/48` greedy tokens against the official-checkpoint FP64 oracle;
+  `2.03x` the accepted 49-handle baseline (`4.89–4.92 token/s`).
+- `ctx4096`: minimum public-output cosine `0.990820` at position 4095, board
+  tail byte-exact with the simulator, `48/48` greedy tokens, boundary
+  fail-closed. Gate record `release/contexts/ctx4096.qualification.json`.
+- `ctx8192`: public outputs clear the gate at `0.986076` and its EOS gate
+  passes, but its calibration is donor-zero-extended rather than native, so it
+  stays `pending` and needs `--allow-unqualified-profile`.
+
+EOS terminates cleanly on all three and the 48-token oracle passes on all
+three. Measured against the re-derived FP64 reference, `ctx8192` reproduces the
+reference exactly while `ctx1024` and `ctx4096` stop one token earlier, omitting
+a terminal period — non-blocking, and explained in
+[the strict-EOS note](release/contexts/strict-eos-oracle.md).
+
+Long prompts are the weak point: tokens are still fed in one at a time, so a
+512-token prompt costs about `41 s` on ctx1024. The fail-closed native-prefill
+planner already implements the `S128 -> S32 -> S16 -> strict S1 tail` policy
+that would amortise this and exposes its decision per request, but only S1 is
+enabled — no wide block has passed a numeric gate. See
+[the native prefill contract](docs/NATIVE_PREFILL_SCHEDULER.md) and
+[the performance board](release/perf/README.md).
+
+These are Hi3403 measurements on the recorded configuration, not a claim about
+every Hi3403 product. The upstream checkpoint advertises a much longer context;
+what this release fixes at `1024` is the prefill window, not the context.
 
 ## Deploy the prebuilt Hi3403 demo
 
-Release [`v0.1.0`](https://github.com/GitBubble/pico-minicpm5/releases/tag/v0.1.0)
-contains the accepted three-handle deployment: `prefill.om`, `decode.om`,
-`head_flat.om`, the token embedding and tokenizer, plus a small runtime archive
-with the complete `app/` board application and resident AArch64 executor. The
-executor C source and Makefile are archived under `app/native/` in both this
-repository and the runtime archive; they are not duplicate standalone Release
-assets. The three OM files correspond to position-0 prefill, recurrent decode
-and the vocabulary projection head respectively.
+A deployment is assembled from two releases, because the model files did not
+change and are not re-uploaded:
 
-Download and arrange the files on the host:
+| From | What | Why |
+|---|---|---|
+| [`v0.2.0`](https://github.com/GitBubble/pico-minicpm5/releases/tag/v0.2.0) | runtime archive, `SHA256SUMS` | carries the `app/` board application and executor `cef4edb2…` |
+| [`v0.1.0`](https://github.com/GitBubble/pico-minicpm5/releases/tag/v0.1.0) | `prefill.om`, `decode.om`, `head_flat.om`, token embedding, tokenizer | byte-identical in `v0.2.0`, so they stay where they are |
+| [`v0.1.0-ctx-preview`](https://github.com/GitBubble/pico-minicpm5/releases/tag/v0.1.0-ctx-preview) | `decode.ctx4096.om`, `decode.ctx8192.om` | only needed for the extended-context profiles |
+
+Take the runtime from `v0.2.0`. The `v0.1.0` runtime archive carries the older
+executor, which its own shipped source could not rebuild; `v0.2.0` pins one that
+[`docs/EXECUTOR_BUILD.md`](docs/EXECUTOR_BUILD.md) reproduces byte for byte.
 
 ```bash
-mkdir pico-minicpm5-deployment-v0.1.0
-cd pico-minicpm5-deployment-v0.1.0
+mkdir pico-minicpm5-deployment-v0.2.0
+cd pico-minicpm5-deployment-v0.2.0
 
+gh release download v0.2.0 --repo GitBubble/pico-minicpm5 \
+  --pattern 'pico-minicpm5-runtime-v0.2.0.tar.gz' --pattern 'SHA256SUMS'
 gh release download v0.1.0 --repo GitBubble/pico-minicpm5 \
-  --pattern 'pico-minicpm5-runtime-v0.1.0.tar.gz' \
   --pattern 'prefill.om' --pattern 'decode.om' --pattern 'head_flat.om' \
   --pattern 'token_embedding.f16.bin' --pattern 'tokenizer.json'
 
-tar xzf pico-minicpm5-runtime-v0.1.0.tar.gz --strip-components=1
+tar xzf pico-minicpm5-runtime-v0.2.0.tar.gz --strip-components=1
 mkdir -p models assets
 mv prefill.om decode.om head_flat.om models/
 mv token_embedding.f16.bin tokenizer.json assets/
 sha256sum -c SHA256SUMS
+```
+
+For `ctx4096`, add its decode OM and select the profile at startup:
+
+```bash
+gh release download v0.1.0-ctx-preview --repo GitBubble/pico-minicpm5 \
+  --pattern 'decode.ctx4096.om'
+mkdir -p models/ctx4096 && mv decode.ctx4096.om models/ctx4096/decode.om
 ```
 
 Copy the assembled directory to the board and start the demo:
@@ -95,6 +130,10 @@ tar cf - . | ssh root@BOARD_IP \
 
 ssh root@BOARD_IP \
   '/opt/pico-minicpm5/app/chat.sh'
+```
+
+```bash
+ssh root@BOARD_IP '/opt/pico-minicpm5/app/chat.sh --profile ctx4096'
 ```
 
 The accepted board image provides the licensed runtime libraries under
@@ -131,8 +170,8 @@ completion mode for compatibility.
 
 ## Direct use and OpenClaw preview
 
-The current `v0.1.0` release is fixed at `ctx1024` and does **not** meet
-OpenClaw's 4096-token local-model floor. It must not be advertised as an
+The published `ctx1024` profile does **not** meet OpenClaw's 4096-token
+local-model floor. It must not be advertised as an
 OpenClaw-ready bundle. Users who have a separately deployed compatible service
 can follow the detailed Chinese guide. The only currently documented native
 JSONL path is the non-production C4096 split-runner preview; C8192 native OM to

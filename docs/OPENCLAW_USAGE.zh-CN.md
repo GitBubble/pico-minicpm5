@@ -11,7 +11,7 @@
 - 本文的 OpenClaw 操作适用于已经部署好的兼容服务，例如当前 C4096 split-runner 开发预览，或者后续明确标注为 OpenClaw-ready 的发行包；
 - 如果你的包中没有本文“文件检查”列出的组件，请停止操作，不要用其他上下文或其他 runner 冒充。
 
-> 截至本文编写时，公开 GitHub Release 中还没有可供普通用户下载的 OpenClaw-ready Asset。本文是“已部署服务的使用指南”和后续发行合同，不是当前 `v0.1.0` 的可执行安装承诺。没有运营方提供的 SHA 绑定预览包时，请继续使用 `chat.sh`，等待正式发行。
+> 截至本文编写时，公开 GitHub Release 中还没有可供普通用户下载的 OpenClaw-ready Asset。本文是“已部署服务的使用指南”和后续发行契约，不是当前 `v0.1.0` 的可执行安装承诺。没有运营方提供的 SHA 绑定预览包时，请继续使用 `chat.sh`，等待正式发行。
 
 当前兼容状态如下。
 
@@ -116,7 +116,7 @@ sha256sum -c SHA256SUMS
 
 本节假设 MiniCPM5 服务已经运行在 `127.0.0.1:8000`。如果服务尚未启动，请先看“服务部署者附录”。
 
-OpenClaw 会注入 system prompt 和 Agent 上下文，Hi3403 首轮预填充可能明显慢于普通短对话。预览合同下面统一使用 3600 秒超时；正式发行应以 clean-board 实测和 release manifest 为准，不应承诺“五分钟内完成”。
+OpenClaw 会注入 system prompt 和 Agent 上下文，Hi3403 首轮预填充可能明显慢于普通短对话。预览契约下面统一使用 3600 秒超时；正式发行应以 clean-board 实测和 release manifest 为准，不应承诺“五分钟内完成”。
 
 ### 1. 检查服务健康状态
 
@@ -144,7 +144,7 @@ curl -fsS --connect-timeout 5 --max-time 10 \
 1. `status` 必须是 `ok`；
 2. `model` 必须是 `minicpm5-1b`；
 3. 初次使用时 `busy` 应为 `false`；
-4. `context_window` 必须等于实际 OM/runner 的上下文合同，并且至少为 4096。
+4. `context_window` 必须等于实际 OM/runner 的上下文契约，并且至少为 4096。
 
 再检查模型列表：
 
@@ -222,7 +222,7 @@ CONTEXT_WINDOW="$(curl -fsS http://127.0.0.1:8000/healthz | python3 -c 'import j
 关键规则：
 
 - `--context-window` 必须来自当前服务，不能填写 Hugging Face 模型卡中的架构上限；
-- `--max-tokens` 不能超过 native runner 的生成上限；当前预览合同通常使用 128；
+- `--max-tokens` 不能超过 native runner 的生成上限；当前预览契约通常使用 128；
 - `--port` 必须与服务端口一致；
 - 普通用户不要添加 `--supports-tools`。
 
@@ -445,8 +445,8 @@ test -x "$PICO_RUN/bin/pico_persistent_acl_executor"
 注意：
 
 - `--runner-command` 必须是 service 的最后一个参数；其后的所有参数均属于 native runner；
-- 当前普通用户合同禁止工具模式；未来若发行脚本启用工具 opt-in，它必须位于 `--runner-command` 之前；
-- service、runner 与 OM 的 context 和 max-new 合同必须一致；
+- 当前普通用户契约禁止工具模式；未来若发行脚本启用工具 opt-in，它必须位于 `--runner-command` 之前；
+- service、runner 与 OM 的 context 和 max-new 契约必须一致；
 - 当前这条 split-runner 配置仍标记为 `production_ready: false`，只适合研发验证；
 - 没有发行包 manifest 和 SHA 绑定时，不要把它包装成生产服务。
 

@@ -2,13 +2,14 @@
 
 [English](README.md)
 
-<img src="../docs/media/agent-demo.svg" alt="HiAgent 在 Hi3403 板上运行：直通路由的 list_directory 工具调用、确定性上下文 rebase、端侧 9.74 token/s 生成" width="100%">
+<img src="../docs/media/board-chat.svg" alt="MiniCPM5-1B 在 Hi3403 板上回答两个问题，9.9 token/s" width="100%">
 
-录自本目录的 `agent.sh`，真实板端会话。等待段按 `4.5x` 播放，右下角是板子
+录自本目录的 `chat.sh`，真实板端会话。等待段按 `2.4x` 播放，右下角是板子
 自己的墙钟。
 
-本目录是板端用户入口。以下步骤假设 GitHub `v0.1.0` Release 中的文件已经
-复制到 `/opt/pico-minicpm5`。直接运行不需要重新导出 ONNX、不需要
+本目录是板端用户入口。以下步骤假设 `/opt/pico-minicpm5` 下已经装配好一套
+部署——运行时归档取自 `v0.2.0` Release，模型文件取自 `v0.1.0`，装配方式见项目
+README。直接运行不需要重新导出 ONNX、不需要
 调用 ATC，也不需要在板端安装本项目的 host 构建包。
 
 ## 板端目录结构
@@ -27,8 +28,8 @@
 │            qualify_minicpm_greedy_chain.py}
 ├── models/{prefill.om,decode.om,head_flat.om}          # 已验收 ctx1024
 ├── models/ctx128/{prefill.om,decode.om}                # 验收后放入
-├── models/ctx4096/decode.om                            # 已资格化；prefill 共享 models/prefill.om
-├── models/ctx8192/decode.om                            # pending（严格 EOS 门未过）；prefill 同上共享
+├── models/ctx4096/decode.om                            # 已验收；prefill 共享 models/prefill.om
+├── models/ctx8192/decode.om                            # pending（标定非原生）；prefill 同上共享
 └── assets/{token_embedding.f16.bin,tokenizer.json}
 ```
 
@@ -151,7 +152,7 @@ Hi3403 板端门禁。
 运维人员可在应用启动时传入 `--prefill-activation-manifest`，并同时提供 live
 `--available-bytes`、`--base-resident-bytes`、`--reserve-bytes`，复验可选的
 release-v4 activation；四项必须成组出现。`/profile` 和 JSON 报告会同时显示资格
-状态与实际可执行宽度。typed dispatcher 已通过 fake transport 合同测试，但当前
+状态与实际可执行宽度。typed dispatcher 已通过 fake transport 契约测试，但当前
 Release 没有注册任何 production wide handler：尚无完整宽块 OM 通过发布门禁，
 也没有 CLI 注入入口。因此即便 S16/S32/S128 已通过资格，也不会进入调度器，执行
 仍保持 strict S1，绝不会伪造宽块标签。
@@ -185,7 +186,7 @@ executor 先启动三只 OM 加载，同时解析 tokenizer，将两项独立的
 开销重叠。已验收 runtime profile 还固定 transformer 输出槽为 K=0、V=1、
 hidden=2，因而移除原先四次 execute、约 0.8 秒的 KV 启动探测。ctx1024 在
 Hi3403 上完整生成冒烟实测加载为 `7.4 s`，优于只做重叠后的 `8.2–8.6 s`
-和原始的 `10.8–11.5 s`。未声明可信槽位合同的 legacy 调用仍保留动态探测回退。
+和原始的 `10.8–11.5 s`。未声明可信槽位契约的 legacy 调用仍保留动态探测回退。
 
 单次非交互执行：
 
@@ -246,11 +247,12 @@ cd /opt/pico-minicpm5/app/native
 make SDK_ROOT=/path/to/sdk/smp/a55_linux/mpp/out CC=aarch64-mix210-linux-gcc
 ```
 
-完整 runtime profile 与混合路由合同见源码仓库中的
+完整 runtime profile 与混合路由契约见源码仓库中的
 [Agent 路由与运行时 Context Profile 设计](https://github.com/GitBubble/pico-minicpm5/blob/main/docs/AGENT_ROUTING_AND_CONTEXT_PROFILES.zh-CN.md)。
 ctx128 明确只支持 Chat；ctx4096/ctx8192 在对应 OM 完成 descriptor、数值
 （`>0.98`）和板端门禁前保持 pending，受控开发测试必须显式添加
 `--allow-unqualified-profile`。
 
-优化后 ctx1024 路径的板端性能为 `105.5–106.1 ms/token`，即
-`9.42–9.48 token/s`，并保持 48/48 greedy token 一致。
+在 `v0.2.0` 的执行器上，ctx1024 profile 实测 `100.40 ms/token`，即
+`9.96 token/s`，48/48 greedy token 保持一致；ctx4096 为 `7.81 token/s`。
+逐相位数字见[性能板](../release/perf/README.zh-CN.md)。

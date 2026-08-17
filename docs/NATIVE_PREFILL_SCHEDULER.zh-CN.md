@@ -7,7 +7,7 @@
 
 ## 目标
 
-MiniCPM 当前仍逐 token 摄入新增 prompt。Resident K/V、固定前缀快照和
+MiniCPM 当前仍逐 token 送入新增 prompt。Resident K/V、固定前缀快照和
 prompt-only head 抑制已经避免了无效重放和词表投影，但每个剩余新增 prompt token
 仍需执行一次 transformer handle。要继续降低 TTFT，必须提供 native 多 token
 transformer 产物。
@@ -21,7 +21,7 @@ S128 -> S32 -> S16 -> strict S1 tail
 `S<N>` 表示一次已验收调用连续消费 `N` 个 prompt token，并发布后续块或 decode
 所需的全部 K/V 行。它不是另一套模型，也不改变 context 容量。
 
-## 调度合同
+## 调度契约
 
 运行时用上述固定顺序贪心覆盖
 `[resident_prefix_tokens, prompt_tokens)`；调用方传入宽度的顺序不能改变策略。
@@ -65,7 +65,7 @@ K/V `[0,start)` 镜像到 wide handle；只执行一次 wide model；再用 opco
 
 canonical cache 只有 `context-1` 个可写行，而 opcode 6 无法部分发布 wide tensor。
 因此运行时会在任何 model execute 前预检整份计划：最终 position `context-1` 会
-重规划为 strict S1，由既有 S1 合同安全地省略这行不再被消费的 K/V scatter。
+重规划为 strict S1，由既有 S1 契约安全地省略这行不再被消费的 K/V scatter。
 
 固定前缀 snapshot 位置同样是调度硬边界。planner 可以在显式边界后重新从最大宽度
 开始，但任何 wide segment 都不能跨界；因此 Agent 首次请求会在精确 fixed-token

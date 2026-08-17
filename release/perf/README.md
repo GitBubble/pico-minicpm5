@@ -1,6 +1,8 @@
 # Performance board
 
-Rendered view of [`perf-board.json`](perf-board.json). The headline table is a
+[中文](README.zh-CN.md)
+
+Human-written summary of [`perf-board.json`](perf-board.json); where the two disagree the JSON is authoritative. The headline table is a
 2026-08-17 board session that ran all three profiles back to back on the
 retain-input unified executor (`cef4edb2…`); the numbers it superseded are kept
 alongside so the delta is always visible. Numbers that live outside this
@@ -47,8 +49,11 @@ saving proportional to the context, and the three contexts agree:
 | ctx4096 | 98.3 MiB | 129.70 → 102.13 = 27.57 ms | 3.74 GB/s |
 | ctx8192 | 196.6 MiB | 194.75 → 139.88 = 54.87 ms | 3.76 GB/s |
 
-Three points on one line is what makes this a mechanism rather than a
-coincidence, and it is why the longer contexts gain the most.
+A proportional fit through these three points sits at `0.28 ms/MiB`. ctx4096
+and ctx8192 land within `0.6%` of it. ctx1024 saves `24%` less than the fit
+predicts, which is what a fixed per-execute cost looks like when the smallest
+context has the least to amortise it over. The trend is why the longer contexts
+gain the most; it is not three points on one line.
 
 ### Position zero is the same handle everywhere
 
@@ -82,19 +87,24 @@ so the inflation is attention plus warm-up.
 All five modes produced byte-identical position-1 raw outputs and the same 16
 token ids, so this compares cost only.
 
-| Mode | transformer | argmax | **total p50** | tok/s | vs baseline | Verdict |
+| Mode | transformer | argmax | **total p50** | tok/s | p50 change | Verdict |
 |---|---:|---:|---:|---:|---:|---|
 | cached | 194.54 | 1.00 | **219.30** | 4.56 | — | baseline |
-| nocache | 171.25 | 25.21 | **222.34** | 4.50 | +1.4% | rejected |
-| per-model-mixed | 171.30 | 1.00 | **198.57** | 5.04 | −9.5% | superseded |
-| zero-once | 139.85 | 0.99 | **167.11** | 5.98 | −23.8% | **adopted** |
-| promptskip + zero-once | 139.87 | 0.99 | **167.28** | 5.98 | −23.7% | **adopted** |
+| nocache | 171.25 | 25.21 | **222.34** | 4.50 | +1.4% slower | rejected |
+| per-model-mixed | 171.30 | 1.00 | **198.57** | 5.04 | −9.5% faster | superseded |
+| zero-once | 139.85 | 0.99 | **167.11** | 5.98 | −23.8% faster | **adopted** |
+| promptskip + zero-once | 139.87 | 0.99 | **167.28** | 5.98 | −23.7% faster | **adopted** |
 
 The nocache arm is the instructive one: uncaching makes the transformer `23 ms`
 faster and the argmax `24 ms` slower, so it loses overall. Per-model-mixed
 isolates that — uncached transformer, cached argmax — and banks the gain. The
 zero-once executor then takes the transformer down another `31 ms`. Promptskip
 is deliberately flat in steady state; its gain is at prompt positions only.
+
+`zero-once` is the mode that became the shipped retain-input executor
+(`cef4edb2…`). Its `167.11 ms` here and the `165.71 ms` in the headline table
+are the same configuration measured in two sessions; the difference is
+run-to-run variance, not a change.
 
 ## Time to first token
 
@@ -150,20 +160,6 @@ to `0.10%`, which is the cross-check that makes the model usable.
 The 121-token ctx128-bucket run remains the longest single prompt measured
 end to end anywhere in this project, at a mean `95.00 ms` per prompt position.
 
-### What is not measured
-
-No published profile has an end-to-end long-prompt TTFT: the per-token
-ingestion cost is measured on all three, but the largest prompt actually run to
-a first token on ctx1024, ctx4096 or ctx8192 is **47 tokens**. There is also no on-disk run with
-a resident-prefix hit, a fixed-prefix snapshot, or wide prefill blocks.
-
-Two figures quoted in the README, CHANGELOG and release notes — the 810-token
-cold request falling `86.70 s → 69.45 s`, and the 643-token prefix hit reaching
-`14.61 s` — have **no retrievable per-step record**. They were produced live on
-the board and only summarized into prose. They are carried in `perf-board.json`
-under `ttft.unbound_prose_claims` for provenance; no gate depends on them, and
-the fix is to re-run both with the report written to disk.
-
 ## Gate binding
 
 A throughput number is publishable only next to the numeric gate the same
@@ -173,13 +169,32 @@ artifact passed. Throughput never substitutes for a cosine or token gate.
 |---|---|---|---:|
 | ctx1024 | `release/v0.1.0/qualification.json` | PASS | 0.996646 |
 | ctx4096 | `release/contexts/ctx4096.qualification.json` | PASS | 0.990820 |
-| ctx8192 | `release/contexts/ctx8192.qualification.json` | CANDIDATE_STRICT_EOS_FAIL | 0.986076 |
+| ctx8192 | `release/contexts/ctx8192.qualification.json` | CANDIDATE_CALIBRATION_NOT_NATIVE | 0.986076 |
 
-ctx8192's throughput is real and reproducible, and it is still `pending`: its
-strict-EOS sequence gate fails. Use it with `--allow-unqualified-profile` for
-development only.
+ctx8192's throughput is real and reproducible, and the profile is still
+`pending` — because its calibration is donor-zero-extended rather than native,
+and the Chinese oracle, memory envelope and long-prompt items are open. Its EOS
+gate passes: measured against the re-derived FP64 reference it is the only one
+of the three profiles that reproduces the reference exactly
+([why](../contexts/strict-eos-oracle.md)). Use it with
+`--allow-unqualified-profile` for development only.
 
-## Not measured
+## What is not measured
+
+**TTFT.** No published profile has an end-to-end long-prompt run: the per-token
+ingestion cost is measured on all three, but the longest prompt actually taken
+to a first token on ctx1024, ctx4096 or ctx8192 is **47 tokens**. Nothing on
+disk records a resident-prefix hit, a fixed-prefix snapshot, or a wide prefill
+block.
+
+**Three prose-only figures.** The 810-token cold request falling
+`86.70 s → 69.45 s`, the resident repeat falling `18.17 s → 14.61 s`, and the
+643-token prefix hit reaching `14.61 s` have **no retrievable per-step record**.
+They were produced live on the board and only summarised into prose. They sit in
+`perf-board.json` under `ttft.unbound_prose_claims`; no gate depends on them,
+and the fix is to re-run all three with the report written to disk.
+
+**Everything else:**
 
 - Per-layer or per-kernel NPU breakdown — only the five host-observed phases exist.
 - KV snapshot hydration bytes and time at tail positions — no such field is recorded.

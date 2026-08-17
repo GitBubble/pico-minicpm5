@@ -2,11 +2,11 @@
 
 [English](NATIVE_PREFILL_RESIDENCY.md)
 
-本文只解决 S16/S32/S128 发布时的模型常驻、KV 所有权和切换合同。数值资格仍以
+本文只解决 S16/S32/S128 发布时的模型常驻、KV 所有权和切换契约。数值资格仍以
 [`NATIVE_PREFILL_CLOSURE_WORKFLOW.zh-CN.md`](NATIVE_PREFILL_CLOSURE_WORKFLOW.zh-CN.md)
 为准。本文中的状态含义如下：
 
-- **PASS：** 已有源码合同或落盘的 Hi3403/SS928 实测证据；
+- **PASS：** 已有源码契约或落盘的 Hi3403/SS928 实测证据；
 - **CANDIDATE：** 现有接口可以实现，但还没有相应的真实宽块 OM 板端证据；
 - **BLOCKED：** 当前实现或公开运行时接口不能满足，不能用于发布激活。
 
@@ -48,8 +48,8 @@ handle 同时常驻。
 | runtime `valid_len` 从模型输入进入 native scalar/branch | BLOCKED | 尚无真实 S128 carrier、descriptor、libinstsim 与板端资格 |
 | output→input chain 与 FP32→FP16 resident scatter | PASS（本地协议） | executor opcode 4 / 6；`make -C app/native contract-check` PASS |
 | input→input cache copy | PASS（本地协议） | executor opcode 9；96-record wire/越界/no-partial 回归通过；板端 byte-exact 待测 |
-| 跨模型 shared input binding | BLOCKED | `create_dataset()` 仍独立 malloc；尚无引用计数/owner 合同 |
-| resident snapshot/restore | PASS（当前同模型合同） | executor opcode 7 / 8；snapshot 绑定原 `model_index` |
+| 跨模型 shared input binding | BLOCKED | `create_dataset()` 仍独立 malloc；尚无引用计数/owner 契约 |
+| resident snapshot/restore | PASS（当前同模型契约） | executor opcode 7 / 8；snapshot 绑定原 `model_index` |
 
 ## MMZ 下界
 
@@ -176,7 +176,7 @@ model-id 不得泄漏，下一次 strict S1 token 必须一致。若切换成本
 
 ### 4. input-to-input copy 与 shared cache binding
 
-**copy 本地合同已实现；先完成板端资格，再考虑 alias。**
+**copy 本地契约已实现；先完成板端资格，再考虑 alias。**
 
 canonical KV 永远是 decode handle 的 input 3/4。宽块只拥有临时镜像：
 
@@ -222,7 +222,7 @@ dataset buffer，直接 alias 会 double-free。必须先引入引用计数/owne
 - 单 snapshot 最多容纳 `2730` 个 C4096 token 的 K+V；
 - 完整 C4096 K 与 V 各约 `48 MiB`，应使用一对 snapshot id（K 一只、V 一只），
   合计约 `96 MiB`；
-- C8192 完整 K+V 约 `192 MiB`，超过当前总预算，当前合同下 **BLOCKED**。
+- C8192 完整 K+V 约 `192 MiB`，超过当前总预算，当前契约下 **BLOCKED**。
 
 一对 snapshot 必须作为一个逻辑事务：先完整校验两只 id、model generation、ranges
 与 checksum，再恢复 K 和 V；中途失败则 invalidate resident-token metadata，不能
@@ -246,7 +246,7 @@ snapshot canonical decode cache，wide 临时镜像不做 snapshot。
 
 ## 推荐实施顺序
 
-1. 串行构建、资格化 S16、S32、S128；此阶段不要求同时常驻。
+1. 串行构建、验收 S16、S32、S128；此阶段不要求同时常驻。
 2. 用已实现的 input-to-input copy，在固定两 handle 上做 full-payload byte-exact 对照。
 3. 增加 manifest-pinned lazy slot，实测 30 次 load/unload、MMZ、model-id 与切换耗时。
 4. 用 lazy slot 跑完整 `S128→S32→S16→S1`，canonical decode cache + snapshot
@@ -256,7 +256,7 @@ snapshot canonical decode cache，wide 临时镜像不做 snapshot。
 6. universal carrier 通过后替代 lazy slot；shared cache alias 作为独立优化，失败时
    保留 input-copy，不阻断正确性发布。
 
-## 本地合同复现
+## 本地契约复现
 
 ```bash
 cd release_work/pico-minicpm5

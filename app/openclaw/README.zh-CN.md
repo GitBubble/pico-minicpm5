@@ -13,7 +13,7 @@ runner 的 JSONL 接口转换成 OpenAI-compatible HTTP 接口，并生成一个
   `POST /v1/chat/completions`；
 - runner 接口：`pico.minicpm5.runner.v1`，支持 Unix socket 或无 shell 的
   子进程 JSONL；
-- 上下文：OpenClaw 配置要求实际编译合同至少为 4096 token；
+- 上下文：OpenClaw 配置要求实际编译契约至少为 4096 token；
 - 并发：一个生成槽，忙时返回 HTTP 429；
 - 采样：只支持 `temperature=0`；
 - 工具调用：源码支持严格 XML → OpenAI `tool_calls` 转换，但默认关闭。
@@ -150,10 +150,10 @@ chmod 600 config/runtime.json
 当前 C8192 三 OM 的 command 模板是
 `config/runtime.command.example.json`。它直接启动本目录的
 `src/merged_jsonl_runner.py`，并显式传入 runtime module、prefill/decode/head
-三个 OM、embedding、executor 和 zero-once 合同。命令必须写成 JSON 数组：
+三个 OM、embedding、executor 和 zero-once 契约。命令必须写成 JSON 数组：
 
-这里的三 OM 是有意设计的混合上下文合同：long decode 使用 C8192，position-0
-prefill 使用已资格化的 C1024，head 是两条路径共享的无上下文 head。不要为了让
+这里的三 OM 是有意设计的混合上下文契约：long decode 使用 C8192，position-0
+prefill 使用已验收的 C1024，head 是两条路径共享的无上下文 head。不要为了让
 文件名看起来一致而把 prefill/head 冒充为 C8192。
 
 ```json
@@ -227,7 +227,7 @@ PICO_OPENCLAW_PYTHON="$PICO_OPENCLAW_PYTHON" bin/doctor.sh
 - tokenizer、template；
 - Python 依赖；
 - runner socket 或可执行文件；
-- 如果服务已启动，则验证 PID 所有权及 `/healthz` 合同。
+- 如果服务已启动，则验证 PID 所有权及 `/healthz` 契约。
 - 传入 `--profile` 时，还会执行真实的 OpenClaw `config validate --json`；版本
   偏离固定版本会作为非阻断提示报告。
 
@@ -318,7 +318,7 @@ bin/configure-openclaw.sh --profile pico-minicpm
 ~/.openclaw-pico-minicpm/pico-minicpm5.manifest.json
 ```
 
-文件已存在时默认拒绝覆盖。确认 runtime 合同确实改变后才使用：
+文件已存在时默认拒绝覆盖。确认 runtime 契约确实改变后才使用：
 
 ```bash
 bin/configure-openclaw.sh --profile pico-minicpm --force

@@ -16,9 +16,10 @@ the committed source before this manifest was written, and reproduces the hash
 byte for byte.
 
 The new executor retains the workspace input across executes instead of
-rewriting it, so each decode step saves one full workspace write. The saving is
-proportional to the context, and three independent contexts agree on the
-mechanism:
+rewriting it, so each decode step saves one full workspace write. The saving
+therefore grows with the context. Two of the three contexts imply the same
+avoided bandwidth; ctx1024 saves less than a proportional fit predicts, which is
+consistent with a fixed per-execute cost it has the least room to amortise:
 
 | context | workspace retained | transformer saving | implied bandwidth |
 |---|---:|---:|---:|
@@ -61,7 +62,8 @@ not. The expectation had been recorded from the first artifact that ran.
 Details in [`release/contexts/strict-eos-oracle.md`](../contexts/strict-eos-oracle.md).
 
 This does not make the other two profiles defective: their 48-token oracle
-passes, and the reference is near a tie at that step.
+passes, and at that step the reference prefers the period by only `0.31`
+logits.
 
 ## Also in this release
 
@@ -78,7 +80,7 @@ passes, and the reference is near a tie at that step.
 
 ## Known limits
 
-Long-prompt TTFT is unattractive and honest about it: prompt tokens are still
-ingested one at a time, so a 512-token prompt costs `40.7 s` on ctx1024 and
-`54.4 s` on ctx4096. The wide-block prefill path that would amortise this is
-not in this release; no wide block has passed a numeric gate.
+Long-prompt TTFT is poor. Prompt tokens are still fed in one at a time, so a
+512-token prompt costs `40.7 s` on ctx1024 and `54.4 s` on ctx4096. The
+wide-block prefill path that would amortise this is not in this release; no wide
+block has passed a numeric gate.

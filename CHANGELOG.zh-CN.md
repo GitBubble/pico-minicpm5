@@ -13,14 +13,14 @@
 - 它在多次 execute 之间保留 workspace 输入而不是反复重写，因此每个 decode 步省下
   一次完整的 workspace 写入。三档在同一次会话中实测：ctx1024
   `9.46 → 9.96 tok/s`（+5.2%）、ctx4096 `6.53 → 7.81 tok/s`（+19.7%）、ctx8192
-  `4.59 → 6.03 tok/s`（+31.6%）。48 个贪心 oracle token 与各自已资格化基线
+  `4.59 → 6.03 tok/s`（+31.6%）。48 个贪心 oracle token 与各自已验收基线
   逐个一致。
 - 节省与保留的 workspace 成正比——24.6 / 98.3 / 196.6 MiB 对应 5.5 / 27.6 /
   54.9 ms——三点共线，这才使它成为机理而非巧合。
-- 构成 TTFT 的 prompt 摄入成本现在三档皆有实测：每 prompt token `79.49` /
+- 构成 TTFT 的 prompt 送入成本现在三档皆有实测：每 prompt token `79.49` /
   `106.28` / `144.02` ms。ctx1024 的数字与一次独立冷 prefill 实测相差 `0.10%`。
 
-### ctx4096 以混合 prefill 窗口合同转正
+### ctx4096 以混合 prefill 窗口契约转正
 
 - Runtime profile 携带 `context.prefill_window`；ctx4096 与 ctx8192 的 position 0
   在冻结的 ctx1024 `prefill.om` 上引导，并共享 `head_flat.om`，逐字节相同。直接
@@ -79,7 +79,7 @@
   attention→layer-tail 已分别通过同图执行门，bounded synthetic C256
   append→attention 门已通过，但 4 个真实 calibration/held-out 执行全部未过数值门；
   full-C4096/B16 same-OM 也仍被 hidden 精度与 K/V 物理槽顺序阻断。
-- 新增 fail-closed prefill activation/MMZ admission 合同：真实校验 OM、build
+- 新增 fail-closed prefill activation/MMZ admission 契约：真实校验 OM、build
   manifest、qualification 哈希和物理 publisher ABI，宽度证据或内存不合格时只回退
   strict S1。
 - resident KV scatter 已泛化为连续 W 行 FP32→FP16 RNE，并只原子发布到
@@ -87,7 +87,7 @@
   完整 S16 OM 通过前仍不在发布运行时启用宽块。
 - 新增 resident input→input copy opcode 9：96 条 channel-wise K/V 前缀记录会先
   全量校验、source invalidate，再执行 copy 与 destination flush；runtime 已提供
-  canonical decode cache→wide handle helper，真实宽块未资格化前仍不激活。
+  canonical decode cache→wide handle helper，真实宽块未验收前仍不激活。
 - S16 attention→layer-tail 的同图 resident splice 已通过真实 libinstsim 门：
   bridge 仅使用 private TEMP、公开 INOUT 为 0，event SSA `4092/4092`，cosine
   `0.99969908`。
@@ -162,7 +162,7 @@
 - opcode 6 改为事务式发布：全部 scatter record drain/校验、全部 source
   invalidate 后才转换，destination 全部 flush 后才 ACK；flush 失败会终止
   executor，避免继续使用可能失配的 resident cache。
-- strict-S1 发布锚点升级为双路 v4 合同：position 0 bootstrap OM、steady
+- strict-S1 发布锚点升级为双路 v4 契约：position 0 bootstrap OM、steady
   canonical decode OM、实际 head OM、embedding、两套 descriptor、imported protocol
   runner 和 executor 分别绑定；token-exact 证据哈希 little-endian uint32 精确 token-ID
   序列，无需 tokenizer identity。只要提供 activation manifest，即使没有 wide handler，

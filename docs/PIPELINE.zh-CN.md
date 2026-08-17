@@ -10,7 +10,7 @@ pico-minicpm5 model verify --model-dir work/model
 ```
 
 下载固定 revision `4e9de7a0778dc1c362e983e6858f0e77542cbdca`。验证阶段检查
-config、index、safetensors 大小/header/hash、模型 geometry 和符号合同；不匹配
+config、index、safetensors 大小/header/hash、模型 geometry 和符号契约；不匹配
 时 fail closed。认证只读取环境变量 `HF_TOKEN`。
 
 ## 2. 构建浮点参考
@@ -34,7 +34,7 @@ pico-minicpm5 reference calibrate \
 ```
 
 decode 与 position-0 prefill 的量化域不同，必须独立标定。样本打包顺序必须与
-24 层图的 K/V axis 和层顺序一致。calibration manifest 记录输入 hash、clip 合同
+24 层图的 K/V axis 和层顺序一致。calibration manifest 记录输入 hash、clip 契约
 与 context；不得用 decode donor 替代 prefill 标定。
 
 ## 4. 导出真实权重 ONNX
@@ -50,7 +50,7 @@ pico-minicpm5 onnx export-head \
 投影、RoPE、KV append、GQA attention、SwiGLU MLP 与 residual。head 为最终
 RMSNorm 加词表投影。随机权重 fixture 只能用于前端测试，不能生成 Release。
 
-族特定的 Clip 节点钉住激活量程合同；这些边界如何以 `min(推断值, Clip 边界)`
+族特定的 Clip 节点钉住激活量程契约；这些边界如何以 `min(推断值, Clip 边界)`
 封顶 ATC 的 IFMR 量程搜索、以及两个 family 为何不能合并，见
 [量化契约](QUANTIZATION_CONTRACT.zh-CN.md)。
 

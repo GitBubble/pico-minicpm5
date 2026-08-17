@@ -2,14 +2,15 @@
 
 [中文说明](README.zh-CN.md)
 
-<img src="../docs/media/agent-demo.svg" alt="HiAgent running on an Hi3403 board: a directly routed list_directory tool call, a deterministic context rebase, and on-device generation at 9.74 token/s" width="100%">
+<img src="../docs/media/board-chat.svg" alt="MiniCPM5-1B answering two questions on an Hi3403 board at 9.9 token/s" width="100%">
 
-Recorded from this directory's `agent.sh` on a real board. Waits play at
-`4.5x`; the clock at the lower right is the board's own wall time.
+Recorded from this directory's `chat.sh` on a real board. Waits play at `2.4x`;
+the clock at the lower right is the board's own wall time.
 
-This directory is the board-user entry point. It assumes the files from the
-GitHub `v0.1.0` release have already been copied to
-`/opt/pico-minicpm5`; no ONNX export, ATC compilation or host-side
+This directory is the board-user entry point. It assumes a deployment has
+already been assembled under `/opt/pico-minicpm5` — the runtime archive from
+the `v0.2.0` release and the model files from `v0.1.0`, as the project README
+describes; no ONNX export, ATC compilation or host-side
 Python package is needed.
 
 ## Expected board layout
@@ -29,7 +30,7 @@ Python package is needed.
 ├── models/{prefill.om,decode.om,head_flat.om}          # qualified ctx1024
 ├── models/ctx128/{prefill.om,decode.om}                # when qualified
 ├── models/ctx4096/decode.om                            # qualified; prefill is the shared models/prefill.om
-├── models/ctx8192/decode.om                            # pending (strict-EOS gate); shared prefill
+├── models/ctx8192/decode.om                            # pending (calibration not native); shared prefill
 └── assets/{token_embedding.f16.bin,tokenizer.json}
 ```
 
@@ -282,5 +283,6 @@ ctx128 is deliberately chat-only. ctx4096 and ctx8192 remain pending until
 their exact OM sets pass descriptor, numeric (`>0.98`) and board gates;
 controlled development requires the explicit `--allow-unqualified-profile`.
 
-The optimized ctx1024 release measured `105.5–106.1 ms/token`, or
-`9.42–9.48 token/s`, with 48/48 greedy tokens exact.
+On the `v0.2.0` executor the ctx1024 profile measures `100.40 ms/token`, or
+`9.96 token/s`, with 48/48 greedy tokens exact; ctx4096 measures `7.81 token/s`.
+Full per-phase numbers are in [the performance board](../release/perf/README.md).

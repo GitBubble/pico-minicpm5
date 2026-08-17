@@ -13,7 +13,7 @@
 
 ## 工具链
 
-受认可的板端族，以 `linux/amd64` 容器运行：
+官方指定的板端交叉编译工具链，在 `linux/amd64` 容器中运行：
 
 ```text
 镜像      svp-pico-aarch64-tc:latest

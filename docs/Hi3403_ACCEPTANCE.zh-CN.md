@@ -2,7 +2,9 @@
 
 [English](Hi3403_ACCEPTANCE.md)
 
-2026-08-09 验收的三句柄候选由 `release/v0.1.0/release-manifest.json` 唯一标识。
+2026-08-09 验收的三句柄候选由 `release/v0.1.0/release-manifest.json` 唯一标识。三只 OM 的哈希在
+`v0.2.0` 中没有变化；下面的吞吐数字已被 `v0.2.0` 的执行器取代，此处作为历史
+记录保留，当前数字见[性能板](../release/perf/README.zh-CN.md)。
 
 | 模型 | 字节数 | 最低公开 cosine |
 |---|---:|---:|

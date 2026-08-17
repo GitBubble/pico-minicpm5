@@ -84,13 +84,13 @@ shell            run_shell
 schema。工具结果由类型元数据、紧凑预览和稳定 result_id 组成；大结果分页读取，
 不整段复制进上下文。
 
-## 4. Runtime Profile 合同
+## 4. Runtime Profile 契约
 
 Context 不是一个孤立整数。Runtime profile 必须同时绑定：
 
 - 编译 context 与 past length；
 - prefill 窗口：position-zero bootstrap 产物的编译 context。当 prefill 句柄
-  继承自更小 context 的已资格化 profile 时（混合 prefill 窗口合同），它可以
+  继承自更小 context 的已验收 profile 时（混合 prefill 窗口契约），它可以
   小于 capacity；
 - decode、position-zero/prefill、head 产物；
 - packed K/V 几何和 runtime descriptor 数量；
@@ -132,7 +132,7 @@ Profile 在进程启动时选择：
 `chat.sh --profile ctx128`。
 
 各 profile 的资格状态：ctx1024 与 ctx4096 为 `qualified`（ctx4096 走混合
-prefill 窗口合同，由 `release/contexts/ctx4096.qualification.json` 把关）；
+prefill 窗口契约，由 `release/contexts/ctx4096.qualification.json` 把关）；
 ctx128 与 ctx8192 保持 `pending`。ctx8192 的候选证据已入库
 （`release/contexts/ctx8192.qualification.json`），严格 EOS 序列门 FAIL，
 因此仍需 `--allow-unqualified-profile`。
@@ -155,17 +155,17 @@ ctx128 与 ctx8192 保持 `pending`。ctx8192 的候选证据已入库
 加载器必须 fail-closed：decode 的 attention mask 宽度与 K/V past length 对齐
 profile capacity，prefill 句柄的 mask 宽度与 K/V past length 对齐声明的
 `prefill_window`，runtime `--context` 与 profile 一致；发布 profile 还必须校验
-产物 hash。禁止静默截断、根据文件名猜合同。跨 profile 复用 OM 仅允许显式声明
-的混合 prefill 窗口合同：扩展 context profile 可以继承冻结的已资格化 ctx1024
+产物 hash。禁止静默截断、根据文件名猜契约。跨 profile 复用 OM 仅允许显式声明
+的混合 prefill 窗口契约：扩展 context profile 可以继承冻结的已验收 ctx1024
 `models/prefill.om` 作为 position-zero bootstrap，并在
 `release/contexts/<profile>.qualification.json` 记录中按 hash 绑定。position 0
-之后的 prompt token 由 decode 句柄上的 S1/native-prefill 规划器摄入，因此窗口
+之后的 prompt token 由 decode 句柄上的 S1/native-prefill 规划器送入，因此窗口
 从不限制 prompt 长度——capacity 才限制。ABI/hash 相同时 tokenizer、embedding 和
 vocabulary head 可以共享。
 
 已发布 profile 绑定互不重复且完整覆盖 0、1、2 的 K/V/hidden 槽位。这用
 已验证的编译期 ABI 取代 runtime KV 特征化，移除四次启动 execute。显式 legacy
-模型路径可省略该合同并使用动态探测；release profile 不得依靠推断。
+模型路径可省略该契约并使用动态探测；release profile 不得依靠推断。
 
 ### 4.3 生成长度
 
@@ -191,7 +191,7 @@ Native compiler 按固定最大块优先策略增加真正多 token prefill：
 在宽块通过对应 context 的数值与板端门禁前，已验收 Release 只启用 S1。实现顺序
 先闭环 S16，再扩 S32、S128。Builder 由 context 和 sequence length 参数化，
 不为每个 context 复制应用源码。详见
-[native prefill 合同](NATIVE_PREFILL_SCHEDULER.zh-CN.md)。
+[native prefill 契约](NATIVE_PREFILL_SCHEDULER.zh-CN.md)。
 
 当前实现为每个工具 schema 懒创建固定前缀快照。Executor 的通用 opcode 保存/恢复
 显式 resident-input 范围；MiniCPM adapter 把 prefix token 数转换成两只 packed

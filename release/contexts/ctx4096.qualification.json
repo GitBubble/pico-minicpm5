@@ -108,7 +108,7 @@
         39,
         130073
       ],
-      "deviation": "one terminal token: the reference writes '.' (35) then EOS (1); this profile stops at EOS (130073). Non-blocking \u2014 the 48-token greedy oracle passes and the reference is near a tie at that step."
+      "deviation": "one terminal token: the reference writes '.' (35) then EOS (1); this profile stops at EOS (130073). Non-blocking \u2014 the 48-token greedy oracle passes and the reference prefers the period by only 0.31 logits at that step."
     },
     "context_boundary": {
       "position": 4096,

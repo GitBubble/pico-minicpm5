@@ -14,8 +14,9 @@
 清单之前，它对着**已提交的源码**重跑过一次，逐字节复现出同一个哈希。
 
 新执行器在多次 execute 之间保留 workspace 输入而不是反复重写，因此每个 decode
-步省下一次完整的 workspace 写入。节省与上下文成正比，三个独立上下文对机理给出
-一致的读数：
+步省下一次完整的 workspace 写入。节省因此随上下文增长。三档里有两档折算出相同
+的避免带宽；ctx1024 比按比例的拟合少省一些，这与它最没有空间摊薄固定的单次
+execute 开销相符：
 
 | 上下文 | 保留的 workspace | transformer 节省 | 折合带宽 |
 |---|---:|---:|---:|
@@ -25,13 +26,13 @@
 
 ## 实测：一次板端会话，三档同场
 
-| Profile | 每 token p50 | token/s | 相对 v0.1.0 路径 | prompt 摄入 |
+| Profile | 每 token p50 | token/s | 相对 v0.1.0 路径 | prompt 送入 |
 |---|---:|---:|---:|---:|
 | ctx1024 | 100.40 ms | **9.96** | +5.2% | 79.49 ms/token |
 | ctx4096 | 127.96 ms | **7.81** | +19.7% | 106.28 ms/token |
 | ctx8192 | 165.71 ms | **6.03** | +31.6% | 144.02 ms/token |
 
-三档的 48 个贪心 oracle token 与各自已资格化基线**逐个一致**。ctx1024 的摄入数字
+三档的 48 个贪心 oracle token 与各自已验收基线**逐个一致**。ctx1024 的送入数字
 与一次独立的冷 prefill 实测相差 `0.10%`。
 
 ## ctx4096 转正；ctx8192 仍为候选
@@ -40,7 +41,7 @@
 模拟器逐字节一致、48/48 贪心 token、边界 fail-closed），作为 **qualified**
 profile 发布。它的 decode OM 是 Release 资产；`prefill.om` 与 `head_flat.om`
 就是冻结的 `v0.1.0` 文件，在每个上下文之间逐字节共享——这就是混合 prefill 窗口
-合同，现在已在一次会话中于三个宽度上完成板端验证。
+契约，现在已在一次会话中于三个宽度上完成板端验证。
 
 `ctx8192` 保持 **pending**。它的公开输出过门、EOS 判定现已为 `PASS`，但标定是
 donor 零扩展而非原生，且中文 oracle、内存包络、长 prompt 三项仍未闭合。
@@ -53,8 +54,8 @@ donor 零扩展而非原生，且中文 oracle、内存包络、长 prompt 三�
 那条"期望"是从第一个跑出来的工件记录下来的。详见
 [`release/contexts/strict-eos-oracle.md`](../contexts/strict-eos-oracle.md)。
 
-这并不说明另外两档有缺陷：它们的 48 token oracle 全过，而参考模型在那一步本身
-就接近平手。
+这并不说明另外两档有缺陷：它们的 48 token oracle 全过，而参考模型在那一步也只
+以 `0.31` 个 logit 的优势选择句号。
 
 ## 本版还包含
 
@@ -69,6 +70,6 @@ donor 零扩展而非原生，且中文 oracle、内存包络、长 prompt 三�
 
 ## 已知限制
 
-长 prompt 的 TTFT 并不好看，本文如实写出：prompt token 仍是逐个摄入的，因此
-512 token 的 prompt 在 ctx1024 上要 `40.7 s`、ctx4096 上要 `54.4 s`。能摊薄这笔
+长 prompt 的 TTFT 很差：prompt token 仍然逐个送入，512 token 的 prompt 在
+ctx1024 上需要 `40.7 s`，在 ctx4096 上需要 `54.4 s`。能摊薄这笔
 开销的宽块 prefill 路径不在本版中——目前没有任何宽块通过数值门。

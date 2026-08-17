@@ -1,5 +1,7 @@
 # The strict-EOS expectation, re-derived
 
+[中文](strict-eos-oracle.zh-CN.md)
+
 The ctx8192 record carried `eos: FAIL_STRICT_SEQUENCE_MISMATCH` against this
 sequence:
 

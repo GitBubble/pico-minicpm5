@@ -109,7 +109,7 @@ real Clip node.
 The two OMs are the same graph. `family` reaches it through exactly one door —
 which clip preset is loaded — and reaches calibration through exactly one line:
 prefill samples reference position 0 only, decode samples positions `>= 1`
-only. The shipped ctx1024 binaries differ by 2,529 bytes out of 687 MB.
+only. The two shipped ctx1024 binaries are built from the same graph and differ in size by only 2,529 bytes out of 687 MB, though more of their content differs than that (section 5).
 
 They cannot be merged, because position 0's activations are not slightly
 different but *orders of magnitude* larger. Recomputed from the float

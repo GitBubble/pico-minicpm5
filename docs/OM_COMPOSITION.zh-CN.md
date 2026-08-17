@@ -1,4 +1,4 @@
-# OM 图级组合合同
+# OM 图级组合契约
 
 [English](OM_COMPOSITION.md)
 

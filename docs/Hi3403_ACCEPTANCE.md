@@ -2,8 +2,11 @@
 
 [中文](Hi3403_ACCEPTANCE.zh-CN.md)
 
-The accepted 2026-08-09 three-handle candidate is identified in
-`release/v0.1.0/release-manifest.json`.
+This records the 2026-08-09 acceptance of the three-handle candidate
+identified in `release/v0.1.0/release-manifest.json`. The three OM hashes are
+unchanged in `v0.2.0`; the throughput figures below were superseded by the
+`v0.2.0` executor and are kept here as the historical record. Current numbers
+are in [the performance board](../release/perf/README.md).
 
 | Model | Bytes | Minimum public cosine |
 |---|---:|---:|

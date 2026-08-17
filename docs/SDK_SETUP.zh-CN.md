@@ -11,4 +11,4 @@ custom-op 库，以及合法可用的 Hi3403 运行环境。
 环境。不得把 SDK、`.so`、板端凭据或 simulator dump 上传到公开 CI cache。
 
 公开 CI 可运行 `pico-minicpm5 build --backend fake`，它只验证编排和 manifest
-合同，不代表 PICO 数值正确或 OM 可上板加载。
+契约，不代表 PICO 数值正确或 OM 可上板加载。

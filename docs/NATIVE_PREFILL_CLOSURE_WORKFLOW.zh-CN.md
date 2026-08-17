@@ -29,7 +29,7 @@ MMZ 不足时，运行时只能报告该宽度被禁用，不能生成一个“�
 | full-C4096/B16 layer0 boundary | BLOCKED（H=0.956954；ABI V0/K1/H2） | 修复 attention 精度与 K/V 槽顺序 |
 | S16 单层 / 24 层 | BLOCKED | full-C4096/B16 数值、全层 handoff |
 | S32 / S128 | NOT STARTED | 等 S16 全门禁通过 |
-| 多行 resident KV scatter | 本地合同 PASS | 真实宽块 descriptor/板端验证 |
+| 多行 resident KV scatter | 本地契约 PASS | 真实宽块 descriptor/板端验证 |
 | canonical KV input→input copy | 本地协议 PASS | 两 handle 板端 byte-exact |
 | 多宽度同时 residency | BLOCKED | 未来 carrier schema 或 lazy-wide admission |
 
@@ -124,7 +124,7 @@ production readiness 仍全部为 false。CPU 上叠加 input/QK-K/AV-V factor �
 
 第一层诊断现已 fail-closed 收敛。score 输出 descriptor 是 dense FP32
 `[1,16,16,32]`/32768B；descriptor-native NCHW 与唯一仍符合 descriptor 的
-head/query transpose 都不能解释误差，W4 与 NC1HWC0 则被物理字节合同排除。
+head/query transpose 都不能解释误差，W4 与 NC1HWC0 则被物理字节契约排除。
 独立编译的 terminal Neg→Neg 变体与原 score 的 raw 输出逐字节相同
 （`8982ab50...`），cosine 仍为 `-0.0709976621`，最大误差仍为
 `67.1187148`。因此 descriptor/layout、原 Nop/Report seam 与 terminal
@@ -164,7 +164,7 @@ diagnostic OM
 测得 attention-context cosine `0.995993`；把该硬件 attention 送入同一 tail
 reference 后，hidden cosine 为 `0.999496`。因此当前问题是 attention 误差经
 o_proj/MLP 放大，而不是 private tail seam 读错。主 OM 的物理输出槽还实际为
-`V0/K1/H2`，不符合发布合同 `K0/V1/H2`。当前不存在 release qualification，
+`V0/K1/H2`，不符合发布契约 `K0/V1/H2`。当前不存在 release qualification，
 boundary、single-layer、24 层、runtime、production readiness 全部为 false。
 
 四样本 fulljoin reference dataset 现已物化并完成闭集审计。manifest SHA256 为
@@ -179,12 +179,12 @@ single-layer、24 层、release 与 production 仍全部为 false，并明确记
 calibration 不保证修复数值问题。
 
 因此完整单层的首个阻塞已精确收敛为：先关闭上述 real-C256
-`Gather-S16 → Crop` 边界，修复并资格化真实域 attention 精度，纠正
+`Gather-S16 → Crop` 边界，修复并验收真实域 attention 精度，纠正
 K/V 物理输出槽顺序，再用绑定的真实 calibration 与 held-out 样本重跑
 full-C4096/B16 same-OM boundary。只有这些门都通过，才能连接已通过的
 RMSNorm/QKV 与 resident tail，并把 24 个如实的 layer slice 汇总为
 `[1,48,16,128]`。
-bounded H2 resident bridge 也已证明基础 Scatter/Gather 执行合同：position `0,1,31,4095`
+bounded H2 resident bridge 也已证明基础 Scatter/Gather 执行契约：position `0,1,31,4095`
 均 no-deadloop，selected/witness cosine 约 `0.99999995`，非目标行 byte-exact，
 event SSA `102/102`；OM SHA256 为
 `76eeedd497b5e3cbfad74b5c10392cf3e031e50972eea7c2ae8a12f7fedb990d`。
@@ -274,7 +274,7 @@ OM/build/runner/executor/descriptor identity，布尔标志不再有效。所有
 residency。顶层 S1 anchor 不合法时整体拒绝 activation；anchor 不一致或 base 少报时
 禁用宽块，但保留已验证 S1 路线。
 
-三份独立 24 层 S16/S32/S128 OM 不得默认同时常驻。串行构建和资格化可以继续，
+三份独立 24 层 S16/S32/S128 OM 不得默认同时常驻。串行构建和验收可以继续，
 但完整运行时路线必须满足以下条件之一：
 
 1. clean-board 实测证明 base models、独立宽块及安全 reserve 能通过 MMZ
@@ -318,7 +318,7 @@ mask row `j` 暴露绝对 K/V 前缀 `[0,start+j)`，并以最后一个 context 
 current-token sentinel。真实合格的 wide 图必须在内部把同一块先前的 K/V 动态追加
 到绝对 slot，后续 row 才能消费。运行时在任何 model execute 前预检整份计划；由于
 v1 opcode 6 不能越过 `context-1` cache，最终 context position 强制重规划为 S1。
-这些只是 fake 验证的软件合同，不代表真实 wide OM 已存在。
+这些只是 fake 验证的软件契约，不代表真实 wide OM 已存在。
 
 ## 自动门禁
 

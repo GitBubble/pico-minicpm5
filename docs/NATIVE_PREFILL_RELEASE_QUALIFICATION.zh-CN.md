@@ -1,6 +1,6 @@
 # Native prefill 发布资格 v4
 
-Native S16/S32/S128 宽块刻意区分两套资格合同：
+Native S16/S32/S128 宽块刻意区分两套资格契约：
 
 - `pico.minicpm5.prefill-block-qualification.v2` 仅保留给开发采集和兼容读取，
   不具备发布激活资格；
@@ -24,7 +24,7 @@ pico-minicpm5 qualify-prefill-block-release \
   --out work/prefill/release-qualification.json
 ```
 
-资格化 S16 之前，必须先生成 content-bound strict-S1 baseline：
+验收 S16 之前，必须先生成 content-bound strict-S1 baseline：
 
 ```bash
 pico-minicpm5 qualify-prefill-s1-release \
@@ -53,7 +53,7 @@ pico-minicpm5 qualify-prefill-s1-release \
 
 每个 workload artifact 都绑定该次运行实际使用的 head OM 与 embedding SHA-256。
 `prompt_sha256` 和 `output_tokens_sha256` 对“有序 token ID 序列按 little-endian
-uint32 紧密打包后的字节串”做 SHA-256，合同名固定为
+uint32 紧密打包后的字节串”做 SHA-256，契约名固定为
 `sha256-le32-u32-token-id-sequence`。比较对象已经是精确 token ID，因此解释或复现
 该 hash 不需要 tokenizer artifact。精确定义是对
 `b"".join(struct.pack("<I", token_id) for token_id in token_ids)` 计算 SHA-256，

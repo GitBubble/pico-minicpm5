@@ -2,10 +2,11 @@
 
 [中文说明](README.zh-CN.md)
 
-<img src="../docs/media/board-chat.svg" alt="MiniCPM5-1B answering two questions on an Hi3403 board at 9.9 token/s" width="100%">
+<img src="../docs/media/board-agent.gif" alt="A four-turn agent session on an Hi3403 board" width="100%">
 
-Recorded from this directory's `chat.sh` on a real board. Waits play at `2.4x`;
-the clock at the lower right is the board's own wall time.
+Recorded from this directory's `agent.sh` on a real board and played at the
+speed it ran: a greeting, a file written under explicit approval, the listing
+that confirms the write, and an exact `swish(2)`. Nothing is sped up or cut.
 
 This directory is the board-user entry point. It assumes a deployment has
 already been assembled under `/opt/pico-minicpm5` — the runtime archive from
@@ -82,11 +83,13 @@ agent retains conversation/tool history until `/clear`; model handles,
 executor and device buffers remain resident.
 
 Built-ins are `list_directory`, `read_file`, `search_text`, `git_status`,
-`write_file` and `run_shell`. The first four run automatically. Writes and
-shell commands prompt `Allow once? [y/N]` every time and default to deny. File
-tools are confined to the startup working directory; use `--workspace PATH`
-to set an explicit boundary. `/tools`, `/permissions` and `/context` display
-the registry, policy and token budget.
+`calculate`, `write_file` and `run_shell`. The first five run automatically —
+`calculate` evaluates a closed arithmetic language with no filesystem, no
+subprocess and no name outside its own table, so it is weaker than a read.
+Writes and shell commands prompt `Allow once? [y/N]` every time and default to
+deny. File tools are confined to the startup working directory; use
+`--workspace PATH` to set an explicit boundary. `/tools`, `/permissions` and
+`/context` display the registry, policy and token budget.
 
 `/help` prints Linux-style command help with syntax, ranges and scope. Use
 `/help COMMAND` (for example, `/help max`) for the detailed form.

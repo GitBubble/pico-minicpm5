@@ -921,3 +921,21 @@ def test_a_read_that_also_mutates_is_never_answered_without_the_model(
     """
     agent = _agent_module()
     assert agent.route_obvious_read_only(query) is None
+
+
+def test_write_file_refuses_a_directory_in_the_terms_it_was_asked(
+        tmp_path) -> None:
+    """A model that omits the filename gets an answer it can act on.
+
+    os.replace onto a directory raises Errno 21 from inside the write and
+    reports a temporary filename the model has never seen; one board turn
+    answered the resulting message by telling the user their file was missing.
+    """
+    agent = _agent_module()
+    tools = agent.WorkspaceTools(tmp_path)
+    (tmp_path / "sub").mkdir()
+
+    for target in (".", "sub"):
+        with pytest.raises(agent.ToolExecutionError) as raised:
+            tools._write_file({"path": target, "content": "hello"})
+        assert "directory" in str(raised.value)

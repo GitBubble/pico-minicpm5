@@ -2,11 +2,16 @@
 
 [English](README.md) · [板端 Demo](app/README.zh-CN.md)
 
-<img src="docs/media/board-chat.svg" alt="MiniCPM5-1B 在 Hi3403 板上回答两个问题，9.9 token/s" width="100%">
+<img src="docs/media/board-agent.gif" alt="Hi3403 板端的四轮 agent 会话" width="100%">
 
-板上的真实会话，不是演示稿：三个常驻句柄 `7.3 s` 加载完成，随后模型以
-`9.91` 和 `9.92 token/s` 作答。右下角是板子自己的墙钟；等待段按 `2.4x` 播放，
-输出段按真实速度播放。
+一次板端会话，按它真实运行的速度播放。没有加速，也没有剪辑，所以屏幕上的每一个
+数字都是板子当时给出的。
+
+问候在 `3.2 s` 后得到回答，因为不需要工具的轮次不会被披露任何工具 schema。写文件
+需要，那也就是慢的那一轮：`498` 个 prompt token，每个 `79.5 ms`——进度条把它数出来，
+而不是藏起来。之后两轮根本没有惊动模型：列目录 `2.1 ms`，`swish(2)` `0.7 ms`，
+由 Python 算出，因为这个数模型自己会算错。列目录同时也是对写入的验证：`a.txt`
+就在里面。
 
 `pico-minicpm5` 将固定版本的
 [`openbmb/MiniCPM5-1B`](https://huggingface.co/openbmb/MiniCPM5-1B)

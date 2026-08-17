@@ -7,22 +7,30 @@ board latency rather than a scripted delay.
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import pty
 import re
 import select
+import struct
 import subprocess
 import sys
+import termios
 import time
 
-BOARD = "root@192.168.137.100"
-REMOTE = (
+BOARD = os.environ.get("PICO_DEMO_BOARD", "root@192.168.137.100")
+REMOTE = os.environ.get("PICO_DEMO_REMOTE") or (
     "cd /root/minicpm5_opt_resident_scatter && "
     "TERM=xterm-256color PICO_MINICPM5_COLOR=always MAX_NEW=96 ./agent.sh"
 )
+COLS = int(os.environ.get("PICO_DEMO_COLS", "100"))
+LINES = int(os.environ.get("PICO_DEMO_LINES", "28"))
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]")
 PROMPT_RE = re.compile(r"You\s*❯")
+# write_file and run_shell ask before every call. A recording that
+# cannot answer would stall at the first one.
+APPROVE_RE = re.compile(r"Allow once\?\s*\[y/N\]")
 
 
 def _plain(text: str) -> str:
@@ -31,6 +39,11 @@ def _plain(text: str) -> str:
 
 def record(turns: list[str], out_path: str, idle_quit: float = 240.0) -> None:
     master, slave = pty.openpty()
+    # Size the pty before the remote starts, so the board's UI wraps at the
+    # same width the renderer will draw. Without this the remote assumes 80
+    # columns and every long line breaks in the wrong place.
+    fcntl.ioctl(slave, termios.TIOCSWINSZ,
+                struct.pack("HHHH", LINES, COLS, 0, 0))
     os.set_blocking(master, False)
     proc = subprocess.Popen(
         ["ssh", "-tt", "-o", "ConnectTimeout=10", BOARD, REMOTE],
@@ -61,8 +74,14 @@ def record(turns: list[str], out_path: str, idle_quit: float = 240.0) -> None:
                 sys.stdout.write(text)
                 sys.stdout.flush()
 
+            tail = _plain(buffer)[-200:]
+            if APPROVE_RE.search(tail) and time.time() - last_out > 0.4:
+                os.write(master, b"y\r")
+                buffer, last_out = "", time.time()
+                continue
+
             # Feed the next turn once the REPL is idle at its prompt.
-            if pending and PROMPT_RE.search(_plain(buffer)[-200:]) \
+            if pending and PROMPT_RE.search(tail) \
                     and time.time() - last_out > 1.2 \
                     and time.time() - sent_at > 3.0:
                 turn = pending.pop(0)

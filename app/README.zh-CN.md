@@ -2,10 +2,11 @@
 
 [English](README.md)
 
-<img src="../docs/media/board-chat.svg" alt="MiniCPM5-1B 在 Hi3403 板上回答两个问题，9.9 token/s" width="100%">
+<img src="../docs/media/board-agent.gif" alt="Hi3403 板端的四轮 agent 会话" width="100%">
 
-录自本目录的 `chat.sh`，真实板端会话。等待段按 `2.4x` 播放，右下角是板子
-自己的墙钟。
+录自本目录的 `agent.sh`，真实板端会话，按它运行的速度播放：一句问候、一次
+经显式批准的写文件、一次用来验证该写入的目录列举，以及一个精确的
+`swish(2)`。没有加速，也没有剪辑。
 
 本目录是板端用户入口。以下步骤假设 `/opt/pico-minicpm5` 下已经装配好一套
 部署——运行时归档取自 `v0.2.0` Release，模型文件取自 `v0.1.0`，装配方式见项目
@@ -79,7 +80,9 @@ template，并保留多轮历史直至 `/clear`；`agent.sh` 再加入下面描�
 每个问题重新加载约 10 秒。
 
 内置工具为 `list_directory`、`read_file`、`search_text`、`git_status`、
-`write_file` 和 `run_shell`。前四项自动执行；文件写入和 shell 每次都弹出
+`calculate`、`write_file` 和 `run_shell`。前五项自动执行——`calculate` 只在
+一套封闭的算术语言内求值，不碰文件系统、不起子进程、不解析自身表以外的任何
+名字，因此比只读工具还弱。文件写入和 shell 每次都弹出
 `Allow once? [y/N]`，默认拒绝。所有文件工具被限制在启动时的工作目录内，可用
 `--workspace PATH` 显式指定边界。`/tools`、`/permissions` 和 `/context` 分别
 显示工具、权限和 token 预算。

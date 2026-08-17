@@ -2,12 +2,18 @@
 
 [中文说明](README.zh-CN.md) · [Board demo](app/README.md) · [板端 Demo](app/README.zh-CN.md)
 
-<img src="docs/media/board-chat.svg" alt="MiniCPM5-1B answering two questions on an Hi3403 board at 9.9 token/s" width="100%">
+<img src="docs/media/board-agent.gif" alt="A four-turn agent session on an Hi3403 board" width="100%">
 
-A real session on the board, not a mock-up: three resident handles load in
-`7.3 s`, then the model answers at `9.91` and `9.92 token/s`. The clock at the
-lower right is the board's own wall time; waits play at `2.4x` and output plays
-in real time.
+One board session, played at the speed it actually ran. Nothing is sped up and
+nothing is cut, so the numbers on screen are the ones the board produced.
+
+The model answers a greeting `3.2 s` after the prompt, because a turn that
+needs no tool is disclosed no tool schema. Writing a file does need one, and
+that is the slow turn: `498` prompt tokens at `79.5 ms` each, which the spinner
+counts down rather than hides. The two turns after it never reach the model —
+the directory listing takes `2.1 ms` and `swish(2)` takes `0.7 ms`, computed in
+Python because the model gets that particular number wrong. The listing is also
+the check on the write: `a.txt` is in it.
 
 `pico-minicpm5` turns the pinned
 [`openbmb/MiniCPM5-1B`](https://huggingface.co/openbmb/MiniCPM5-1B)

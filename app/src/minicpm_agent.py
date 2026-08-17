@@ -1570,6 +1570,13 @@ class WorkspaceTools:
 
     def _write_file(self, arguments: dict[str, str]) -> str:
         path = self._path(arguments["path"], for_write=True)
+        if path.is_dir():
+            # os.replace onto a directory raises Errno 21 from deep inside the
+            # write, and the model is handed a temporary filename it has never
+            # seen. A model that omits the filename should be told that, in
+            # the terms it asked in.
+            raise ToolExecutionError(
+                "path names a directory; give the file to write")
         content, repairs = _repair_written_content(arguments["content"])
         if len(content.encode("utf-8")) > 16_384:
             raise ToolExecutionError("write_file content exceeds 16 KiB")

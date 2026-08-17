@@ -9,8 +9,10 @@ can run in the minimal Python environment shipped on Hi3403 boards.
 """
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -268,10 +270,102 @@ _MODEL_TRANSFORM = (
     "总结", "概括", "解释", "分析", "比较", "翻译", "summarize", "summary",
     "explain", "analyse", "analyze", "compare", "translate",
 )
-_UNSAFE_DIRECT = (
-    "改写", "修改", "删除", "创建", "生成", "执行", "运行", "modify", "edit",
-    "delete", "remove", "write", "create", "run", "execute",
+# A hand-kept list of mutation words drifted from the planner's own tables:
+# "保存为", "写到", "追加", "save", "append" and "store" were absent, so
+# "read README.md and save the result as out.txt" was direct-routed to a bare
+# read with the model skipped and the save silently dropped. The guard is now
+# derived from the same tables the planner uses, so the two cannot disagree
+# about what may be answered without the model. Defined after them; see
+# _unsafe_for_direct_route.
+# Planning-stage intent tables, all matched through _has_term: ASCII terms need
+# word boundaries, CJK terms are substrings. Mutation and shell intent are read
+# by both the planner and the deterministic router so the two never disagree
+# about what may be answered without the model.
+_BROAD_WORK = (
+    "修复", "实现", "开发", "调试", "fix", "implement", "develop", "debug",
+    "refactor",
 )
+_WRITE_INTENT = (
+    "修改", "改成", "改为", "换成", "写入", "写进", "写到", "创建", "新建",
+    "保存", "存到", "存进", "存为", "另存", "追加", "更新", "删除", "删掉",
+    "清空", "清掉", "替换", "重命名", "记录到", "输出到", "edit", "modify",
+    "write", "create", "save", "append", "update", "delete", "remove",
+    "replace", "rename", "mkdir", "touch",
+)
+# The registry has no delete tool: write_file only writes UTF-8 content. A
+# delete verb therefore needs the shell as well, and "clear the TODOs out of
+# this file" needs write_file, so both are disclosed and the operator approves
+# whichever the model actually calls. Routing these to "write" alone offered a
+# tool that cannot do the job.
+_DELETE_INTENT = (
+    "删除", "删掉", "清空", "清掉", "delete", "remove", "rm",
+)
+_SHELL_INTENT = (
+    "执行", "运行", "启动", "跑", "命令", "测试", "构建", "编译", "安装",
+    "shell", "command", "run", "test", "build", "compile", "install", "bash",
+    "python3", "pytest",
+)
+_READ_INTENT = (
+    "读取", "查看", "看看", "看下", "看一下", "显示", "列出", "列举", "罗列",
+    "打开", "浏览", "检查", "搜索", "查找", "检索", "有哪些", "都有什么",
+    "read", "show", "view", "open", "print", "display", "list", "ls",
+    "inspect", "search", "find", "grep", "pwd", "cwd", "git status",
+    "git log", "git diff",
+)
+
+
+def _unsafe_for_direct_route(lowered: str) -> bool:
+    """Whether a turn must reach the model rather than a deterministic tool.
+
+    A direct route answers with one read and stops. That is only safe when the
+    turn asks for nothing else, so any mutation, shell or broad-work intent
+    disqualifies it -- otherwise the read is performed, the model is skipped,
+    and the rest of the request is dropped without a word to the operator.
+    """
+    return (_has_term(lowered, _WRITE_INTENT)
+            or _has_term(lowered, _SHELL_INTENT)
+            or _has_term(lowered, _BROAD_WORK))
+# Something a workspace tool can actually reach. A transformation such as
+# 总结/explain implies a tool only once the turn names one of these.
+_WORKSPACE_NOUN = (
+    "文件", "文件夹", "目录", "路径", "工作区", "仓库", "分支", "提交", "代码",
+    "项目", "脚本", "日志", "配置", "file", "files", "folder", "directory",
+    "dir", "path", "workspace", "repo", "repository", "branch", "commit",
+    "code", "project", "script", "log", "logs", "config", "readme",
+)
+# A turn that asks for a value rather than about one. The deterministic router
+# reads this as its evaluation cue; the planner never does, because a cue on
+# its own does not say whether the model can be trusted with the arithmetic.
+_MATH_REQUEST = (
+    "计算", "算一下", "算下", "算出", "求值", "求出", "等于", "是多少",
+    "得多少", "结果是", "calculate", "compute", "evaluate", "what is",
+    "how much",
+)
+# Mathematics that is about a function rather than a value of it. These turns
+# are the model's own work and must never reach the calculator.
+_MATH_CONCEPTUAL = (
+    "为什么", "为何", "原理", "推导", "证明", "区别", "对比", "怎么", "如何",
+    "介绍", "定义", "含义", "why", "how does", "how do", "derive", "proof",
+    "prove", "difference", "definition", "meaning", "intuition",
+)
+# Arithmetic this model evaluates wrongly on its own. Its algebra is exact --
+# it reproduces 2 x 0.8808 = 1.7616 -- so only transcendental, high-precision
+# and large-magnitude work is planned as a tool call.
+_DISPATCHED_MATH = (
+    "sigmoid", "swish", "gelu", "silu", "relu", "softplus", "factorial",
+    "logarithm", "square root", "cube root", "arctan", "阶乘", "开方",
+    "平方根", "立方根", "对数", "正弦", "余弦", "正切",
+)
+_DISPATCHED_SHAPE = re.compile(
+    r"\d\s*(?:\*\*|\^)\s*\d"
+    r"|\d{4,}\s*[+\-*/×÷]|[+\-*/×÷]\s*\d{4,}"
+    r"|[\d一二三四五六七八九十]+\s*次方"
+    r"|保留\s*[\d一二三四五六七八九十]+\s*位小数"
+    r"|精确到|\d+\s*位小数|decimal places")
+# A path referent, unlike _ABSOLUTE_PATH, must open a token: "22/7" and the
+# decimal literal "3.14" are arithmetic, not workspace evidence.
+_PATH_REFERENT = re.compile(r"(?:^|[\s\"'`(（])/[\w.-]")
+_NAMED_EXTENSION = re.compile(r"\.[A-Za-z]")
 
 
 def _has_term(text: str, terms: tuple[str, ...]) -> bool:
@@ -332,6 +426,326 @@ def _search_query(text: str) -> str | None:
     return query or None
 
 
+_SQRT_2 = math.sqrt(2.0)
+_SQRT_2_OVER_PI = math.sqrt(2.0 / math.pi)
+
+
+def _sigmoid(value: float) -> float:
+    """Logistic 1/(1+e^-x), taken in the branch that cannot overflow."""
+    if value >= 0.0:
+        return 1.0 / (1.0 + math.exp(-value))
+    scaled = math.exp(value)
+    return scaled / (1.0 + scaled)
+
+
+def _silu(value: float) -> float:
+    """SiLU, also published as swish: x*sigmoid(x)."""
+    return value * _sigmoid(value)
+
+
+def _gelu(value: float) -> float:
+    """Exact GELU x*Phi(x) = 0.5x(1+erf(x/sqrt(2))), not the tanh fit."""
+    return 0.5 * value * (1.0 + math.erf(value / _SQRT_2))
+
+
+def _gelu_tanh(value: float) -> float:
+    """The tanh GELU approximation many inference kernels ship instead."""
+    inner = _SQRT_2_OVER_PI * (value + 0.044715 * value * value * value)
+    return 0.5 * value * (1.0 + math.tanh(inner))
+
+
+def _softplus(value: float) -> float:
+    """ln(1+e^x), taken in the branch that cannot overflow."""
+    if value > 0.0:
+        return value + math.log1p(math.exp(-value))
+    return math.log1p(math.exp(value))
+
+
+def _relu(value: float) -> float:
+    """max(x, 0) in the float domain the activation is defined over."""
+    return float(value) if value > 0.0 else 0.0
+
+
+#: Beyond this the digit count cannot change any value the evaluator can
+#: hold: integers are capped at 1024 bits and floats saturate at 1e308.
+_MAX_ROUND_DIGITS = 323
+
+
+def _round(value, ndigits=None):
+    """round() with a bounded digit count.
+
+    CPython's ``int.__round__`` materialises ``10 ** abs(ndigits)`` to do the
+    rounding, so ``round(1, -10**7)`` builds a 33-million-bit integer from a
+    sixteen-character expression: eight AST nodes, well under every limit this
+    module checks, five seconds of CPU here and quadratically worse beyond.
+    Nothing else in the language reaches it -- ``_power`` rejects a large base
+    first -- and the deterministic router evaluates arithmetic with no model
+    and no operator in the loop, so the guard has to live on the function.
+    """
+    if ndigits is None:
+        return round(value)
+    if isinstance(ndigits, bool) or not isinstance(ndigits, int):
+        raise ToolExecutionError("round takes an integer digit count")
+    if not -_MAX_ROUND_DIGITS <= ndigits <= _MAX_ROUND_DIGITS:
+        raise ToolExecutionError(
+            f"round takes a digit count in "
+            f"[-{_MAX_ROUND_DIGITS}, {_MAX_ROUND_DIGITS}]")
+    return round(value, ndigits)
+
+
+# A closed expression language: no attribute, no subscript, no import and no
+# name the tables below do not define. Every result is a real number short
+# enough to print. Keeping the cost bounded needs care as well as closure:
+# a builtin can allocate far more than its arguments suggest, which is why
+# `round` is wrapped below rather than registered directly.
+_MAX_EXPRESSION_CHARS = 256
+_MAX_EXPRESSION_NODES = 128
+_MAX_INT_BITS = 1024
+_MAX_FACTORIAL = 170
+_MATH_CONSTANTS = {"pi": math.pi, "e": math.e, "tau": math.tau}
+
+
+def _finite(value: int | float) -> int | float:
+    """Reject any value that is complex, unprintable or not finite."""
+    if type(value) is int:
+        if value.bit_length() > _MAX_INT_BITS:
+            raise ToolExecutionError(
+                f"integer magnitude exceeds {_MAX_INT_BITS} bits")
+        return value
+    if type(value) is not float:
+        raise ToolExecutionError("result is not a real number")
+    if math.isnan(value) or math.isinf(value):
+        raise ToolExecutionError("result is not finite")
+    return value
+
+
+def _power(base: int | float, exponent: int | float) -> int | float:
+    """Raise to a power, refusing the integer results too large to hold.
+
+    Only ``int ** nonnegative int`` can grow without bound, and its size is
+    known from the operands, so the bound is checked before the multiply.
+    """
+    if type(base) is int and type(exponent) is int and exponent >= 0:
+        if base.bit_length() * exponent > _MAX_INT_BITS:
+            raise ToolExecutionError(
+                f"integer magnitude exceeds {_MAX_INT_BITS} bits")
+    return _finite(base ** exponent)
+
+
+def _factorial(value: int | float) -> int:
+    """Factorial of a small nonnegative integer, refusing the rest."""
+    if type(value) is not int or not 0 <= value <= _MAX_FACTORIAL:
+        raise ToolExecutionError(
+            f"factorial takes an integer in [0, {_MAX_FACTORIAL}]")
+    return math.factorial(value)
+
+
+# Each entry carries the argument counts its function accepts, because the
+# planner dispatches precision requests here: a turn asking for four decimals
+# must be able to say round(ln(7), 4) rather than be refused into the rounding
+# habit the tool exists to replace.
+_MATH_FUNCTIONS = {
+    "abs": (abs, (1,)), "min": (min, (2, 3)), "max": (max, (2, 3)),
+    "round": (_round, (1, 2)), "floor": (math.floor, (1,)),
+    "ceil": (math.ceil, (1,)), "pow": (_power, (2,)),
+    "exp": (math.exp, (1,)), "ln": (math.log, (1,)), "log": (math.log, (1, 2)),
+    "log2": (math.log2, (1,)), "log10": (math.log10, (1,)),
+    "sqrt": (math.sqrt, (1,)), "sin": (math.sin, (1,)),
+    "cos": (math.cos, (1,)), "tan": (math.tan, (1,)),
+    "asin": (math.asin, (1,)), "acos": (math.acos, (1,)),
+    "atan": (math.atan, (1,)), "sinh": (math.sinh, (1,)),
+    "cosh": (math.cosh, (1,)), "tanh": (math.tanh, (1,)),
+    "erf": (math.erf, (1,)), "gamma": (math.gamma, (1,)),
+    "factorial": (_factorial, (1,)), "sigmoid": (_sigmoid, (1,)),
+    "silu": (_silu, (1,)), "swish": (_silu, (1,)), "gelu": (_gelu, (1,)),
+    "gelu_tanh": (_gelu_tanh, (1,)), "relu": (_relu, (1,)),
+    "softplus": (_softplus, (1,)),
+}
+_BINARY_OPERATORS = {
+    ast.Add: lambda left, right: left + right,
+    ast.Sub: lambda left, right: left - right,
+    ast.Mult: lambda left, right: left * right,
+    ast.Div: lambda left, right: left / right,
+    ast.FloorDiv: lambda left, right: left // right,
+    ast.Mod: lambda left, right: left % right,
+    ast.Pow: _power,
+}
+_UNARY_OPERATORS = {
+    ast.UAdd: lambda operand: +operand,
+    ast.USub: lambda operand: -operand,
+}
+# Mathematical notation rather than Python source: the caret is exponentiation
+# and the typographic operators are their ASCII spellings. Rewriting the text
+# instead of the parsed tree keeps Python's precedence, so 1+2^3 is 9. A
+# Chinese IME left in fullwidth mode types the digits that way too, so they
+# fold here as well and １＋１ parses like 1+1.
+_MATH_ALIASES = str.maketrans({
+    "×": "*", "·": "*", "＊": "*", "÷": "/", "／": "/", "＋": "+", "－": "-",
+    "−": "-", "（": "(", "）": ")", "．": ".", "０": "0", "１": "1", "２": "2",
+    "３": "3", "４": "4", "５": "5", "６": "6", "７": "7", "８": "8", "９": "9",
+})
+
+
+def _normalized_math(text: str) -> str:
+    return text.translate(_MATH_ALIASES).replace("^", "**")
+
+
+def _evaluate_node(node: ast.AST) -> int | float:
+    """Evaluate one whitelisted node; anything unlisted is refused here."""
+    if type(node) is ast.Constant:
+        if type(node.value) not in (int, float):
+            raise ToolExecutionError("only real number literals are allowed")
+        return _finite(node.value)
+    if type(node) is ast.Name:
+        try:
+            return _MATH_CONSTANTS[node.id.lower()]
+        except KeyError:
+            raise ToolExecutionError(f"unknown name: {node.id}") from None
+    if type(node) is ast.UnaryOp:
+        operator = _UNARY_OPERATORS.get(type(node.op))
+        if operator is None:
+            raise ToolExecutionError("unsupported unary operator")
+        return _finite(operator(_evaluate_node(node.operand)))
+    if type(node) is ast.BinOp:
+        operator = _BINARY_OPERATORS.get(type(node.op))
+        if operator is None:
+            raise ToolExecutionError("unsupported operator")
+        return _finite(operator(
+            _evaluate_node(node.left), _evaluate_node(node.right)))
+    if type(node) is ast.Call:
+        if type(node.func) is not ast.Name or node.keywords:
+            raise ToolExecutionError("only positional calls to named functions")
+        entry = _MATH_FUNCTIONS.get(node.func.id.lower())
+        if entry is None:
+            raise ToolExecutionError(
+                f"unknown function: {node.func.id}; available: "
+                + " ".join(sorted(_MATH_FUNCTIONS)))
+        function, arity = entry
+        if len(node.args) not in arity:
+            raise ToolExecutionError(
+                f"{node.func.id} takes "
+                + " or ".join(str(count) for count in arity) + " argument(s)")
+        return _finite(function(
+            *(_evaluate_node(argument) for argument in node.args)))
+    raise ToolExecutionError(
+        f"unsupported expression element: {type(node).__name__}")
+
+
+def evaluate_expression(expression: str) -> str:
+    """Evaluate a mathematical expression and echo what was computed.
+
+    The echoed expression is unparsed from the tree that was evaluated, so the
+    answer always states the operator and function that produced it -- ``2^10``
+    echoes ``2 ** 10``, and ``gelu`` is never confused with ``gelu_tanh``.  The
+    value is printed at full precision, because truncating it here is the very
+    habit this tool exists to replace.
+    """
+    source = _normalized_math(str(expression).strip())
+    if not source:
+        raise ToolExecutionError("expression is empty")
+    if len(source) > _MAX_EXPRESSION_CHARS:
+        raise ToolExecutionError(
+            f"expression exceeds {_MAX_EXPRESSION_CHARS} characters")
+    try:
+        tree = ast.parse(source, mode="eval")
+    except (SyntaxError, ValueError, MemoryError, RecursionError) as error:
+        raise ToolExecutionError(f"cannot parse expression: {error}") from None
+    # Bounds the depth of _evaluate_node's recursion as well as its width.
+    if sum(1 for _ in ast.walk(tree)) > _MAX_EXPRESSION_NODES:
+        raise ToolExecutionError(
+            f"expression exceeds {_MAX_EXPRESSION_NODES} nodes")
+    try:
+        value = _evaluate_node(tree.body)
+    except ToolExecutionError:
+        raise
+    except ZeroDivisionError:
+        raise ToolExecutionError("division by zero") from None
+    except (ArithmeticError, ValueError, TypeError, MemoryError) as error:
+        raise ToolExecutionError(f"cannot evaluate: {error}") from None
+    return f"{ast.unparse(tree)} = {value!r}"
+
+
+# Read from the one namespace the host can evaluate, so the planner never
+# advertises a function the calculator would refuse.
+_DISPATCHED_CALL = re.compile(
+    r"\b(?:" + "|".join(
+        sorted(_MATH_FUNCTIONS, key=len, reverse=True)) + r")\s*\(")
+_EXPRESSION_RUN = re.compile(r"[0-9A-Za-z_.,+\-*/%()\s]+")
+_OPERATOR_MARKS = "+-*/%("
+_SENTENCE_TAIL = " \t?!=.。？！"
+# A span that is the whole turn is an evaluation request only when nothing
+# else reads it that way: "1-40" answers "which lines?" far more often than it
+# subtracts. A call, a decimal, a power or a second operator settles it.
+_SELF_EVIDENT_EXPRESSION = re.compile(
+    r"\(|\d\.\d|\*\*|[+\-*/%][^+\-*/%]*[+\-*/%]")
+
+
+def _dispatched_math(text: str, lowered: str) -> bool:
+    """Report arithmetic this model evaluates wrongly on its own.
+
+    A named function without an operand is a concept question the model
+    answers from its own knowledge; only an evaluation is dispatched.
+    """
+    if _DISPATCHED_CALL.search(lowered) is not None:
+        return True
+    if _DISPATCHED_SHAPE.search(text) is not None:
+        return True
+    return _has_term(lowered, _DISPATCHED_MATH) \
+        and re.search(r"\d", text) is not None
+
+
+def _expression_edges(head: str, tail: str) -> bool:
+    """Reject windows that cannot open or close an arithmetic expression."""
+    return ((head[0].isdigit() or head[0] in "(+-." or "(" in head)
+            and (tail[-1].isdigit() or tail[-1] == ")"))
+
+
+def _applies_an_operation(source: str) -> bool:
+    """Report whether a candidate computes something rather than restates it.
+
+    Read from the parsed tree rather than the text, so a sign is not mistaken
+    for arithmetic: ``-1`` is a literal, ``2-1`` is a subtraction.
+    """
+    try:
+        tree = ast.parse(source, mode="eval")
+    except (SyntaxError, ValueError, MemoryError, RecursionError):
+        return False
+    return any(type(node) in (ast.BinOp, ast.Call) for node in ast.walk(tree))
+
+
+def _math_expression(text: str) -> str | None:
+    """Return the longest span of the text this host can evaluate itself.
+
+    A bare literal is not an evaluation request, so a candidate must apply at
+    least one operator or function, read from its tree rather than its text.
+    Candidates are then accepted by evaluating them, which keeps the router
+    from ever proposing a form the calculator would refuse.
+    """
+    best: str | None = None
+    for run in _EXPRESSION_RUN.findall(_normalized_math(text)):
+        tokens = run.split()[:24]
+        for start in range(len(tokens)):
+            for stop in range(len(tokens), start, -1):
+                candidate = " ".join(tokens[start:stop]).rstrip(",.")
+                if not candidate or (
+                        best is not None and len(candidate) <= len(best)):
+                    continue
+                if not _expression_edges(tokens[start], candidate):
+                    continue
+                if not any(mark in candidate for mark in _OPERATOR_MARKS):
+                    continue
+                if not _applies_an_operation(candidate):
+                    continue
+                try:
+                    evaluate_expression(candidate)
+                except (ToolExecutionError, ArithmeticError, ValueError,
+                        TypeError, RecursionError):
+                    continue
+                best = candidate
+                break
+    return best
+
+
 def route_obvious_read_only(
     user_text: str, previous_assistant: str = "",
 ) -> RouteDecision | None:
@@ -343,7 +757,7 @@ def route_obvious_read_only(
     """
     text = user_text.strip()
     lowered = text.lower()
-    if not text or _has_term(lowered, _UNSAFE_DIRECT):
+    if not text or _unsafe_for_direct_route(lowered):
         return None
     needs_model = _has_term(lowered, _MODEL_TRANSFORM)
 
@@ -397,6 +811,29 @@ def route_obvious_read_only(
             "read_file", {"path": file_path, "start_line": start,
                           "end_line": end}),
             "explicit file-window request", confidence=0.98)
+
+    # Arithmetic is routed only after the search and file-window routes have
+    # declined, so a named file keeps winning: a turn that reads and computes
+    # must not have its read half dropped in favour of the digits.
+    if not needs_model and not _has_term(lowered, _MATH_CONCEPTUAL) \
+            and not _has_term(lowered, _WRITE_INTENT) \
+            and not _has_term(lowered, _SHELL_INTENT):
+        expression = _math_expression(text)
+        # Either the turn says it wants a value, or it is nothing but an
+        # expression no other reading fits. Anything else keeps its own intent.
+        asks_for_value = expression is not None and (
+            _has_term(lowered, _MATH_REQUEST)
+            or (expression == _normalized_math(text).strip(_SENTENCE_TAIL)
+                and _SELF_EVIDENT_EXPRESSION.search(expression) is not None))
+        if asks_for_value:
+            # The host produces the digits and prints them verbatim: the model
+            # never sees this turn, so it cannot round or invent one.
+            return RouteDecision(
+                mode="DIRECT_TOOL", confidence=0.99,
+                tool_calls=(ToolCall("calculate", {"expression": expression}),),
+                response_policy="DIRECT_FORMATTED", schema_profile="none",
+                permission="automatic",
+                reason="explicit numeric evaluation request")
 
     path_match = _ABSOLUTE_PATH.search(text)
     path = path_match.group(1) if path_match else "."
@@ -499,14 +936,17 @@ def compact_agent_messages(
         used += len(block) + 1
 
     memory = (
-        "[Host-compacted session memory; raw tool output omitted]\n"
+        "Earlier turns in this session, compacted by the host; raw tool "
+        "output omitted. This is background, not a request:\n"
         + "\n".join(blocks))
-    compacted = [dict(messages[0]), {
-        "role": "user", "content": memory,
-    }, {
-        "role": "assistant",
-        "content": "Compacted session memory loaded.",
-    }]
+    # The memory is a second system block, not a user turn with a synthetic
+    # assistant reply. Delivered as conversation it reads as something to
+    # continue: one board session reproduced the compacted transcript as its
+    # answer, and another answered with the acknowledgement text verbatim.
+    # A system block is background, and there is no assistant line to copy.
+    # The fixed-prefix snapshot is unaffected -- it renders only the first
+    # system message and the tool schema, both of which are unchanged.
+    compacted = [dict(messages[0]), {"role": "system", "content": memory}]
     for turn in recent:
         compacted.extend(turn)
     return compacted, {
@@ -514,6 +954,42 @@ def compact_agent_messages(
         "turns_compacted": len(older),
         "memory_chars": len(memory),
     }
+
+
+_FENCE = re.compile(
+    r"\A\s*```[A-Za-z0-9_+.-]*[ \t]*\r?\n(?P<body>.*?)\r?\n?```\s*\Z",
+    re.DOTALL)
+_ESCAPE = re.compile(r"\\[nrt]")
+_UNESCAPE = {"\\n": "\n", "\\r": "\r", "\\t": "\t"}
+
+
+def _repair_written_content(content: str) -> tuple[str, list[str]]:
+    """Undo two things a small model reliably does to a file parameter.
+
+    Asked for a Python script, MiniCPM5 wrote the two-character sequence
+    backslash-n instead of newlines and wrapped the result in a markdown
+    fence. The file collapsed to a single comment line, ran, exited zero, and
+    the model reported success. Both are mechanical and both are repairable
+    here, which is cheaper and more reliable than asking the model again.
+
+    The repairs are deliberately narrow. Escapes are decoded only when the
+    content carries no real newline at all, which no hand-written multi-line
+    file does, and the fence is stripped only when it encloses the whole
+    content. Anything the model did that these two rules do not cover is left
+    alone and fails visibly, which is better than being silently mangled.
+
+    :param content: the raw ``content`` argument.
+    :returns: the content to write and a list of repairs, for the receipt.
+    """
+    repairs: list[str] = []
+    if "\n" not in content and _ESCAPE.search(content) is not None:
+        content = _ESCAPE.sub(lambda m: _UNESCAPE[m.group()], content)
+        repairs.append("decoded literal escape sequences")
+    match = _FENCE.match(content)
+    if match is not None:
+        content = match.group("body")
+        repairs.append("removed an enclosing markdown fence")
+    return content, repairs
 
 
 def _integer(arguments: dict[str, str], name: str, default: int,
@@ -530,10 +1006,39 @@ class WorkspaceTools:
 
     _READ_ONLY = (
         "current_directory", "list_directory", "read_file", "search_text",
-        "git_status", "read_result_page")
+        "git_status", "read_result_page", "calculate")
+    # Seven of the executor's eight fixed-prefix snapshot ids; arithmetic is a
+    # cross-cutting capability rather than a task category, so it rides with
+    # the read set instead of claiming a profile of its own per filesystem
+    # combination. Measured price of riding along, ctx1024 tokens: read_only
+    # 558 -> 625, read_write 616 -> 683, read_shell 617 -> 684, all 675 -> 742,
+    # i.e. +67 tokens (+5.3 s of prefill) on every read-bearing turn, paid so
+    # that a read-then-compute turn never needs a widening round.
+    # A turn that names a file to write, or a command to run, needs the tool
+    # that does it and a way to say where -- not the read set as well. The
+    # superset is not merely 675 ctx1024 tokens of prefill: disclosing nine
+    # tools for "write pi.py, then run it" was measured selecting `math.pi`,
+    # a tool that does not exist, four rounds running. Narrow disclosure is a
+    # correctness measure before it is a latency one.
+    # read_file rides along because the system prompt tells the model to
+    # inspect before changing, and calculate because a turn that writes a
+    # computed number must not compute it in the model: asked for swish(2)
+    # it answers 1.728 against a true 1.7616, and that number would be
+    # written to the file. Both are cheaper than the widening round they
+    # replace, and far cheaper than a wrong result on disk.
+    #: Tools that ask the operator on every call. Escalation widens towards
+    #: fewer of these before it widens towards fewer tools.
+    _PRIVILEGED = frozenset({"write_file", "run_shell"})
+    _MUTATION_BASE = ("current_directory", "read_file", "calculate")
+    _WRITE_SET = (*_MUTATION_BASE, "write_file")
+    _SHELL_SET = (*_MUTATION_BASE, "run_shell")
     _PROFILES = {
         "none": (),
+        "calculate": ("calculate",),
         "result_page": ("read_result_page",),
+        "write": _WRITE_SET,
+        "shell": _SHELL_SET,
+        "write_shell": (*_MUTATION_BASE, "write_file", "run_shell"),
         "read_only": _READ_ONLY,
         "read_write": (*_READ_ONLY, "write_file"),
         "read_shell": (*_READ_ONLY, "run_shell"),
@@ -545,6 +1050,7 @@ class WorkspaceTools:
         "read_file": "text_lines",
         "search_text": "search_matches",
         "git_status": "git_status",
+        "calculate": "number",
         "write_file": "write_receipt",
         "run_shell": "shell_output",
     }
@@ -599,6 +1105,14 @@ class WorkspaceTools:
                         "max_chars": {"type": "integer", "default": 800}},
                     "required": ["ref"],
                 }, self._read_result_page),
+                Tool("calculate", (
+                    "Evaluate arithmetic exactly. Use it for any decimal, "
+                    "power, root, log or activation value instead of computing "
+                    "one yourself, and report its digits verbatim."), {
+                    **obj, "properties": {
+                        "expression": {"type": "string"}},
+                    "required": ["expression"],
+                }, self._calculate),
                 Tool("write_file", "Write a small UTF-8 file in the workspace.", {
                     **obj, "properties": {
                         "path": {"type": "string"},
@@ -622,9 +1136,10 @@ class WorkspaceTools:
     def names(self) -> tuple[str, ...]:
         return tuple(self._tools)
 
-    def names_for_profile(self, profile: str) -> tuple[str, ...]:
+    @classmethod
+    def names_for_profile(cls, profile: str) -> tuple[str, ...]:
         try:
-            return self._PROFILES[profile]
+            return cls._PROFILES[profile]
         except KeyError as error:
             raise ValueError(f"unknown tool schema profile: {profile}") from error
 
@@ -633,35 +1148,62 @@ class WorkspaceTools:
                 for name in self.names_for_profile(profile)]
 
     @classmethod
+    def _workspace_reference(cls, text: str, lowered: str) -> bool:
+        """Report whether the turn names something a workspace tool reaches."""
+        if _has_term(lowered, _WORKSPACE_NOUN):
+            return True
+        if _has_term(lowered, cls._PROFILES["all"]):
+            return True
+        if _PATH_REFERENT.search(text) is not None:
+            return True
+        candidate = _explicit_file_path(text)
+        return candidate is not None \
+            and _NAMED_EXTENSION.search(candidate) is not None
+
+    @classmethod
     def select_schema_profile(
         cls, user_text: str, *, has_context: bool = False,
     ) -> str:
-        """Conservatively omit mutation schemas for clearly scoped requests."""
-        lowered = str(user_text).lower()
-        broad = (
-            "修复", "实现", "开发", "调试", "fix", "implement", "develop",
-            "debug", "refactor")
-        write = (
-            "修改", "写入", "创建", "删除", "替换", "重命名", "edit", "modify",
-            "write", "create", "delete", "remove", "replace", "rename")
-        shell = (
-            "执行", "运行", "命令", "测试", "构建", "编译", "安装", "shell",
-            "command", "run", "test", "build", "compile", "install")
-        read = (
-            "读取", "查看", "显示", "搜索", "查找", "分析", "总结", "read",
-            "show", "view", "search", "find", "analyse", "analyze", "summarize",
-            "explain", "git status", "pwd")
-        if _has_term(lowered, broad):
+        """Disclose the narrowest tool set this turn gives evidence for.
+
+        The schema is a fixed prompt prefix, so an unused tool is charged in
+        ctx1024 prefill tokens on every fresh profile while an undisclosed one
+        costs a single widening round (:meth:`escalate_schema_profile`).  A
+        turn with no evidence of tool intent therefore gets no schema at all.
+        Planning also adapts to the model's arithmetic: the short algebra it
+        reproduces stays with it, and transcendental or high-precision work is
+        planned as a call to ``calculate``.  Disclosure is not authorization --
+        write_file and run_shell still ask the operator on every call,
+        whichever profile names them.
+        """
+        text = str(user_text)
+        lowered = text.lower()
+        if _has_term(lowered, _BROAD_WORK):
             return "all"
-        needs_write = _has_term(lowered, write)
-        needs_shell = _has_term(lowered, shell)
+        needs_delete = _has_term(lowered, _DELETE_INTENT)
+        needs_write = needs_delete or _has_term(lowered, _WRITE_INTENT)
+        needs_shell = needs_delete or _has_term(lowered, _SHELL_INTENT)
+        # A mutating turn is disclosed the mutating tools. It gets the read
+        # set as well only when it also asks to look at something: the file
+        # named in "save it as pi.py" is the write target, not a referent to
+        # be read, so the referent rule must not widen this branch.
+        also_reads = _has_term(lowered, _READ_INTENT)
         if needs_write and needs_shell:
-            return "all"
+            return "all" if also_reads else "write_shell"
         if needs_write:
-            return "read_write"
+            return "read_write" if also_reads else "write"
         if needs_shell:
-            return "read_shell"
-        if _has_term(lowered, read):
+            # calculate rides with the read set, so a shell turn that also
+            # reads keeps exact arithmetic without a second widening round.
+            return "read_shell" if also_reads else "shell"
+        if _has_term(lowered, _READ_INTENT):
+            # A read-then-compute turn takes its numbers from the file, and
+            # the read set carries the calculator for exactly that reason.
+            # A look verb with nothing to look at is arithmetic phrased as a
+            # read, and the read schema would cost it 360 tokens it cannot use.
+            if _dispatched_math(text, lowered) \
+                    and not cls._workspace_reference(text, lowered):
+                return "calculate"
             return "read_only"
         contextual_follow_up = (
             re.match(
@@ -671,14 +1213,68 @@ class WorkspaceTools:
             or re.match(
                 r"^(?:what|why|how)\b.*\b(?:it|that|this|above|previous|"
                 r"line|item)\b", lowered) is not None)
-        if has_context and contextual_follow_up:
+        if has_context and contextual_follow_up \
+                and not cls._workspace_reference(text, lowered):
             # The prior transcript already contains the evidence. Avoid
-            # spending hundreds of ctx1024 tokens on unrelated tool schemas.
-            return "none"
-        return "all"
+            # spending hundreds of ctx1024 tokens on unrelated tool schemas --
+            # but a follow-up that names a value still needs the digits: 265
+            # fixed-prefix tokens against 111 buys them exactly. A follow-up
+            # that names a FILE is not answerable from the transcript at all,
+            # so the referent test has to run first: "这个文件 README.md 里写了
+            # 什么" was reaching this branch and getting no schema, and with no
+            # tools disclosed it also lost the system prompt that would have
+            # told it to call one.
+            return "calculate" if _dispatched_math(text, lowered) else "none"
+        if cls._workspace_reference(text, lowered):
+            # A workspace referent outranks a number in the same turn: the
+            # read set carries the calculator either way, so the compute half
+            # is served while the file half would otherwise be undisclosed.
+            return "read_only"
+        if _dispatched_math(text, lowered):
+            return "calculate"
+        return "none"
+
+    @classmethod
+    def escalate_schema_profile(
+        cls, profile: str, requested: tuple[str, ...],
+    ) -> str | None:
+        """Return the narrowest profile adding ``requested``, else ``None``.
+
+        Widening keeps every tool the turn already disclosed, so a transcript
+        never loses a schema it has already used.  ``None`` means the current
+        profile already discloses the request.
+        """
+        needed = set(cls.names_for_profile(profile))
+        if needed.issuperset(requested):
+            return None
+        needed.update(requested)
+        # Fewest privileged tools first, then fewest tools. Ranking by size
+        # alone tied "write" with "shell" at four tools and broke the tie
+        # alphabetically, so a model asking to read a file from a turn that
+        # disclosed nothing was handed run_shell. Disclosure is not
+        # authorization, but it is still the wrong direction to widen in, and
+        # paying a few hundred tokens for the read set is the right trade.
+        candidates = sorted(
+            (sum(1 for tool in names if tool in cls._PRIVILEGED),
+             len(names), name)
+            for name, names in cls._PROFILES.items() if needed.issubset(names))
+        return candidates[0][2] if candidates else None
+
+    #: Quote characters a model wraps a path in when it copies its own prose.
+    _PATH_QUOTES = ("'", '"', "`", "\u2018", "\u2019", "\u201c", "\u201d")
 
     def _path(self, value: str, *, for_write: bool = False) -> Path:
-        raw = Path(value or ".")
+        # A path argument arrives already parsed out of XML, so quotes around
+        # it are the model quoting itself. Left alone they become the
+        # filename: one board turn wrote thirty bytes to a file literally
+        # named '' before writing the file it had been asked for.
+        cleaned = str(value or "").strip()
+        while len(cleaned) >= 2 and cleaned[0] == cleaned[-1] \
+                and cleaned[0] in self._PATH_QUOTES:
+            cleaned = cleaned[1:-1].strip()
+        if value and not cleaned:
+            raise ToolExecutionError("path is empty once its quotes are removed")
+        raw = Path(cleaned or ".")
         candidate = raw if raw.is_absolute() else self.root / raw
         resolved = candidate.resolve(strict=False)
         try:
@@ -810,6 +1406,8 @@ class WorkspaceTools:
             return with_page_hint(f"搜索结果（{query}）：\n{output}")
         if call.name == "git_status":
             return with_page_hint(f"Git 状态：\n{output}")
+        if call.name == "calculate":
+            return with_page_hint(f"计算结果：{output}")
         return with_page_hint(output)
 
     def _page_slice(self, arguments: dict[str, str]):
@@ -844,6 +1442,11 @@ class WorkspaceTools:
 
     def _current_directory(self, _arguments: dict[str, str]) -> str:
         return str(self.root)
+
+    def _calculate(self, arguments: dict[str, str]) -> str:
+        # One canonical line, so the first line of this result is already the
+        # complete answer wherever the host displays or remembers it.
+        return evaluate_expression(arguments.get("expression", ""))
 
     def _list_directory(self, arguments: dict[str, str]) -> str:
         path = self._path(arguments.get("path", "."))
@@ -967,7 +1570,7 @@ class WorkspaceTools:
 
     def _write_file(self, arguments: dict[str, str]) -> str:
         path = self._path(arguments["path"], for_write=True)
-        content = arguments["content"]
+        content, repairs = _repair_written_content(arguments["content"])
         if len(content.encode("utf-8")) > 16_384:
             raise ToolExecutionError("write_file content exceeds 16 KiB")
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -981,7 +1584,9 @@ class WorkspaceTools:
         finally:
             if temporary.exists():
                 temporary.unlink()
-        return f"wrote {len(content.encode('utf-8'))} bytes to {path.relative_to(self.root)}"
+        written = (f"wrote {len(content.encode('utf-8'))} bytes to "
+                   f"{path.relative_to(self.root)}")
+        return written + (f" ({'; '.join(repairs)})" if repairs else "")
 
     def _run_shell(self, arguments: dict[str, str]) -> str:
         command = arguments["command"].strip()

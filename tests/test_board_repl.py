@@ -157,10 +157,160 @@ def test_agent_repl_executes_native_tool_call(monkeypatch, capsys, tmp_path) -> 
     assert "Use path='.' for that root" in rendered_prompts[0]
     assert str(tmp_path) in rendered_prompts[0]
     assert '"name":"read_file"' in rendered_prompts[0]
-    assert '"name":"write_file"' in rendered_prompts[0]
-    assert '"name":"run_shell"' in rendered_prompts[0]
+    # "What does note.txt say?" names a file and no mutation or shell intent,
+    # so planning now discloses the read set instead of all eight tools. The
+    # mutation schemas used to arrive here only through the fallback-to-"all"
+    # this change removed; on ctx1024 they cost 117 prompt tokens the turn
+    # cannot use, and escalate_schema_profile discloses them in one round if
+    # the model turns out to need them.
+    assert '"name":"write_file"' not in rendered_prompts[0]
+    assert '"name":"run_shell"' not in rendered_prompts[0]
     assert rendered_prompts[0].endswith(
         "<|im_start|>assistant\n<think>\n")
+
+
+def test_agent_repl_widens_the_schema_for_an_undisclosed_tool(
+        monkeypatch, capsys, tmp_path) -> None:
+    """An undisclosed call re-plans once instead of failing the whole turn.
+
+    Narrow disclosure only pays for itself if asking for a missing tool is
+    recoverable: the model requesting one is better evidence of intent than
+    any keyword, so the turn widens to the narrowest superset and re-plans.
+    Approval is untouched -- write_file still asks on every call.
+    """
+    server = _server_module()
+    rendered_prompts = []
+    approvals = []
+    generated = [
+        '<function name="write_file"><param name="path">out.txt</param>'
+        '<param name="content">hi</param></function><|im_end|>',
+        '<function name="write_file"><param name="path">out.txt</param>'
+        '<param name="content">hi</param></function><|im_end|>',
+        "Wrote it.<|im_end|>",
+    ]
+
+    class Tokenizer:
+        def encode(self, text, add_special_tokens=False):
+            assert not add_special_tokens
+            rendered_prompts.append(text)
+            return SimpleNamespace(ids=[0, 130072, 42, 130073])
+
+        def decode(self, ids, skip_special_tokens=True):
+            assert not skip_special_tokens
+            return generated[int(ids[0]) - 100]
+
+    class Session:
+        models = [object(), object(), object()]
+        kv_slots = {0: (0, 1), 1: (0, 1)}
+        tokenizer = Tokenizer()
+        last_phase_steps = []
+
+        def __init__(self, **_kwargs):
+            pass
+
+        def generate(self, ids, *_args, **kwargs):
+            index = 100 + (len(rendered_prompts) - 1)
+            self.last_phase_steps = [{"position": 0}]
+            if kwargs.get("on_token") is not None:
+                kwargs["on_token"]((index,))
+            return "eos", [index], [1.0] * (len(ids) + 1)
+
+        def close(self):
+            pass
+
+    def answer(prompt):
+        if "Allow once?" in prompt:
+            approvals.append(prompt)
+            return "y"
+        return next(prompts)
+
+    prompts = iter(["帮我看一下项目结构", "/quit"])
+    monkeypatch.setattr(server, "Merged", Session)
+    monkeypatch.setattr(builtins, "input", answer)
+    monkeypatch.setattr(sys, "argv", [
+        "merged_board_server.py", "--persistent-executor", "executor",
+        "--decode-model", "decode.om", "--prefill-model", "prefill.om",
+        "--head-model", "head.om", "--embedding", "embedding.bin",
+        "--tokenizer", "tokenizer.json", "--agent",
+        "--workspace", str(tmp_path),
+    ])
+
+    assert server.main() == 0
+
+    output = capsys.readouterr().out
+    assert "Disclosing the read_write tool schema" in output
+    assert '"name":"write_file"' not in rendered_prompts[0]
+    assert '"name":"write_file"' in rendered_prompts[1]
+    assert '"name":"run_shell"' not in rendered_prompts[1]
+    assert len(approvals) == 1
+    assert "Permission required" in output and "write_file(path=" in output
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8") == "hi"
+    assert "not disclosed" not in output
+
+
+def test_agent_repl_recovers_a_tool_call_made_without_a_schema(
+        monkeypatch, capsys, tmp_path) -> None:
+    """A turn planned with no schema still recovers from a tool attempt.
+
+    With no <tools> block the prompt carries no calling template, so a model
+    that tries anyway produces malformed XML rather than a parseable call.
+    That attempt is itself the evidence the turn needed tools.
+    """
+    server = _server_module()
+    rendered_prompts = []
+    generated = [
+        '<function name="list_directory"<|im_end|>',
+        "Nothing to do here.<|im_end|>",
+    ]
+
+    class Tokenizer:
+        def encode(self, text, add_special_tokens=False):
+            assert not add_special_tokens
+            rendered_prompts.append(text)
+            return SimpleNamespace(ids=[0, 130072, 42, 130073])
+
+        def decode(self, ids, skip_special_tokens=True):
+            assert not skip_special_tokens
+            return generated[int(ids[0]) - 100]
+
+    class Session:
+        models = [object(), object(), object()]
+        kv_slots = {0: (0, 1), 1: (0, 1)}
+        tokenizer = Tokenizer()
+        last_phase_steps = []
+
+        def __init__(self, **_kwargs):
+            pass
+
+        def generate(self, ids, *_args, **kwargs):
+            index = 100 + (len(rendered_prompts) - 1)
+            self.last_phase_steps = [{"position": 0}]
+            if kwargs.get("on_token") is not None:
+                kwargs["on_token"]((index,))
+            return "eos", [index], [1.0] * (len(ids) + 1)
+
+        def close(self):
+            pass
+
+    prompts = iter(["你好，喵", "/quit"])
+    monkeypatch.setattr(server, "Merged", Session)
+    monkeypatch.setattr(builtins, "input", lambda _prompt: next(prompts))
+    monkeypatch.setattr(sys, "argv", [
+        "merged_board_server.py", "--persistent-executor", "executor",
+        "--decode-model", "decode.om", "--prefill-model", "prefill.om",
+        "--head-model", "head.om", "--embedding", "embedding.bin",
+        "--tokenizer", "tokenizer.json", "--agent",
+        "--workspace", str(tmp_path),
+    ])
+
+    assert server.main() == 0
+
+    output = capsys.readouterr().out
+    assert "<tools>" not in rendered_prompts[0]
+    assert "disclosing read-only tools" in output
+    assert '"name":"list_directory"' in rendered_prompts[1]
+    assert '"name":"write_file"' not in rendered_prompts[1]
+    assert "Nothing to do here." in output
 
 
 def test_agent_help_describes_command_scope_and_ranges(tmp_path) -> None:

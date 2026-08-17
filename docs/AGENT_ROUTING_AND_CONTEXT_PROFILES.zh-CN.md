@@ -64,9 +64,23 @@ CONFIRM_BEFORE_EXECUTE
 
 1. `/help`、`/context`、`/max`、`/clear`、`/quit` 等本地命令不调用工具和模型。
 2. 明确的列出、显示、读取、搜索、status 请求调用只读工具并直接展示结果。
-3. 包含总结、解释、比较、诊断、建议的请求先取事实，再将紧凑证据交给模型。
-4. 含糊或多步骤任务使用 MiniCPM5 原生 XML 工具协议规划，宿主校验每次调用。
-5. 写入、shell 及未来网络工具继续遵守显式权限；路由不能扩大授权。
+3. 要数值的请求按模型能力分流：它的代数是准的（板端 14 个 token 就给出
+   `2 x 0.8808 = 1.7616`），短算式留给模型；超越函数、高精度和大数量级交给
+   `calculate`——整句只有算式且没有别的读法时直接路由，否则只披露这一个工具。
+   同一句里还点名了文件或写入时，那个意图优先：算术分支是直接路由，它吞掉的
+   子句不会有任何提示。
+4. 包含总结、解释、比较、诊断、建议的请求先取事实，再将紧凑证据交给模型。
+5. 含糊或多步骤任务使用 MiniCPM5 原生 XML 工具协议规划，宿主校验每次调用。
+6. 写入、shell 及未来网络工具继续遵守显式权限；路由不能扩大授权。
+
+以上都没有证据的请求不再回落到整套 schema，而是完全不披露工具。板端实测：整套
+schema 在只有八个工具时是 675 个固定前缀 token，加入 `calculate` 后为 742；
+prompt 送入 79.5 ms/token，旧的回落让一句问候也要先花将近一分钟才吐出第一个
+token。披露不足可用一轮加宽修复（见 §3），披露过度则每一轮都在付费。
+
+加宽的次序是**先按最小权限、再按最少工具**。只按工具数排序会让四工具的写档与
+四工具的 shell 档打平，结果是一个什么都没披露的轮次里，模型只要求读一个文件，
+就被披露了 `run_shell`。披露不等于授权，但这仍然是错误的加宽方向。
 
 ## 3. 工具注册与渐进披露
 
@@ -78,11 +92,24 @@ filesystem-read  list_directory, read_file, search_text
 git-read         git_status 及未来 diff/log
 filesystem-write write_file
 shell            run_shell
+compute          calculate
 ```
+
+`compute` 单独成组：`calculate` 不碰任何文件路径，也不起子进程，只在进程内
+按固定函数表求值一个封闭表达式语言，因此和只读组一样自动放行，但不属于其中
+任何一组。披露不等于授权——`write_file` 和 `run_shell` 无论出现在哪个 profile
+里，每次调用仍然要人工确认。
 
 模型只看到相关工具组。`MODEL_ONLY` 不注入工具 schema，直接路由也完全不渲染
 schema。工具结果由类型元数据、紧凑预览和稳定 result_id 组成；大结果分页读取，
 不整段复制进上下文。
+
+窄披露是可修复的：模型调用了当前 profile 没有的工具时，
+`escalate_schema_profile` 返回既保留已披露工具、又包含该工具的最窄 profile，
+本轮重规划一次，因此会话不会丢掉已经用过的 schema。正是这一轮补救让空 schema
+可以作为默认值。`calculate` 跟着只读组走而不另开组合，因为"先读再算"的请求
+两者都要；实测代价是带只读的 profile 各 +67 个固定前缀 token（+5.3 s）。档位数
+一度被执行器的八个快照 id 卡住，现在快照满了走滑窗淘汰，这条限制已经解除。
 
 ## 4. Runtime Profile 契约
 
@@ -196,7 +223,8 @@ Native compiler 按固定最大块优先策略增加真正多 token prefill：
 当前实现为每个工具 schema 懒创建固定前缀快照。Executor 的通用 opcode 保存/恢复
 显式 resident-input 范围；MiniCPM adapter 把 prefix token 数转换成两只 packed
 KV 输入中 96 个连续 channel range。每只快照上限 64 MiB、总预算 128 MiB、最多
-8 只，超限时 fail closed。该功能已通过 Hi3403 板端 A/B 并在 Agent 中默认开启：
+8 只。尺寸上限失败即关闭；槽位数不是——它是缓存，第 9 个 profile 会淘汰最久未用
+的一只而不是终止会话，这同时也让执行器的槽位数不再反过来限制工具披露能拆多细。该功能已通过 Hi3403 板端 A/B 并在 Agent 中默认开启：
 137-token 前缀恢复耗时 `1.76 ms`，生成 token ID 与文本完全一致，同一条 32-token
 请求由 `26.97 s` 降至 `12.56 s`（降低 `53.4%`）。设置
 `FIXED_PREFIX_SNAPSHOTS=0` 可保留全量重放诊断路径。

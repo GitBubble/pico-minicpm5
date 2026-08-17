@@ -47,11 +47,42 @@ import pico_minicpm5_split_board_runner as runner  # noqa: E402
 import probe_om_execute_latency as probe  # noqa: E402
 import minicpm_agent as agent  # noqa: E402
 import minicpm_profile as profile_contract  # noqa: E402
+import context_ledger as ledger  # noqa: E402
 import minicpm_prefill_schedule as prefill_schedule  # noqa: E402
 import minicpm_prefill_runtime as prefill_runtime_contract  # noqa: E402
 
 HIDDEN, KV_HEADS, HEAD_DIM, LAYERS = gc.HIDDEN, gc.KV_HEADS, gc.HEAD_DIM, gc.LAYERS
+#: Input snapshots the persistent executor can hold at once.
+PREFIX_SNAPSHOT_SLOTS = 8
 CHANNELS = LAYERS * KV_HEADS
+
+
+def observe_prompt_token_ms(phase_steps, observed):
+    """Accumulate this board's measured cost of ingesting one prompt token.
+
+    Prompt positions are the ones that skipped the vocabulary head, so they
+    time the ingest path alone. Measuring instead of assuming keeps the ledger
+    honest across profiles: the same code reports `79.49 ms` on ctx1024 and
+    `144.02 ms` on ctx8192 without being told which it is running.
+
+    :param phase_steps: `Merged.last_phase_steps` from one generate call.
+    :param observed: running totals, mutated in place.
+    :returns: the mean millisecond cost, or `None` before any observation.
+    """
+    for step in phase_steps or ():
+        if not step.get("head_skipped"):
+            continue
+        # A step without an explicit width covers one position: the wide
+        # prefill families are the only producers of `token_count`.
+        tokens = int(step.get("token_count") or 1)
+        if tokens <= 0:
+            continue
+        observed["tokens"] += tokens
+        observed["total_ms"] += float(step.get("total_ms", 0.0))
+    if not observed["tokens"]:
+        return None
+    observed["ms"] = observed["total_ms"] / observed["tokens"]
+    return observed["ms"]
 
 
 def parse_transformer_output_slots(value):
@@ -107,7 +138,8 @@ def agent_command_help(topic, *, context, max_new, thinking, max_tool_steps,
             "SYNOPSIS\n"
             "  /permissions\n\n"
             "SCOPE\n"
-            "  list/read/search/git 自动执行；write_file/run_shell 每次询问，默认拒绝。"),
+            "  list/read/search/git/calculate 自动执行；write_file/run_shell "
+            "每次询问，默认拒绝。"),
         "think": (
             "NAME\n"
             "  /think - 查看或切换模型 thinking\n\n"
@@ -212,6 +244,7 @@ class TerminalUI:
         self._wait_stop = threading.Event()
         self._wait_thread = None
         self._wait_label = ""
+        self._wait_index = 0
         self._wait_started = 0.0
         self._pet_can_animate = False
         self._pet_process_pid = None
@@ -288,7 +321,24 @@ class TerminalUI:
             target=self._spin, name="minicpm-terminal-spinner", daemon=True)
         self._wait_thread.start()
 
+    def update_wait(self, label):
+        """Retitle a running wait without restarting it.
+
+        The board ingests a prompt one token at a time, so a request can sit
+        for tens of seconds behind a spinner that says nothing. The caller
+        knows exactly how many tokens are left, and this turns that into the
+        line the spinner is already redrawing.
+        """
+        running = self._wait_thread is not None
+        if not self.active or not running:
+            return
+        # Set the label only. The spinner thread owns the cursor; a second
+        # writer on the same line interleaves with its carriage return and
+        # leaves the previous label's tail on screen.
+        self._wait_label = str(label)
+
     def _render_wait_frame(self, index):
+        self._wait_index = index
         elapsed = time.perf_counter() - self._wait_started
         if self._pet_can_animate and index % 4 == 0:
             face = self.pet_faces[
@@ -401,6 +451,27 @@ class TerminalUI:
         total_s = sum(step_ms) / 1000.0
         rate = tokens / total_s if total_s > 0 else 0.0
         text = f"  {tokens} tokens · {rate:.2f} tok/s · {reason}"
+        print(self.paint(text, "2;38;5;244"), flush=True)
+
+    def context_summary(self, record):
+        """One line naming the largest consumer of the next prompt.
+
+        The turn summary above reports generation. This reports the other half,
+        which is the expensive one: a prompt token costs an ingest, so the
+        segment holding most of the context is also holding most of the wait.
+        """
+        if not self.is_tty or not record["segments"]:
+            return
+        largest = max(record["segments"], key=lambda row: row["tokens"])
+        used = record["total_tokens"]
+        budget = record.get("budget_tokens")
+        text = f"  context {used}"
+        if budget:
+            text += f"/{budget}"
+        text += (f" tok · {largest['label'][:28]} {largest['share'] * 100:.0f}%"
+                 f" · {record['new_tokens']} new")
+        if "ingest_ms" in record and record["new_tokens"]:
+            text += f" ({record['ingest_ms'] / 1000:.1f}s)"
         print(self.paint(text, "2;38;5;244"), flush=True)
 
 
@@ -733,6 +804,7 @@ class Merged:
             "prefix_snapshot_hit": 0,
             "prefix_snapshot_created": 0,
             "prefix_snapshot_restore_ms": 0.0,
+            "prefix_snapshot_evicted": 0,
         }
 
     def _prefix_plan(self, prompt_ids, reuse_prefix):
@@ -820,6 +892,10 @@ class Merged:
         existing = self._prefix_snapshots.get(str(key))
         if existing is None:
             return 0, 0.0
+        # Touch for the sliding window: dict order is insertion order, so
+        # re-inserting makes the first entry the least recently used one.
+        self._prefix_snapshots[str(key)] = \
+            self._prefix_snapshots.pop(str(key))
         snapshot_id, saved_tokens = existing
         if saved_tokens != fixed:
             raise RuntimeError(
@@ -838,13 +914,24 @@ class Merged:
         fixed = tuple(int(token) for token in tokens)
         if tuple(self._resident_tokens) != fixed:
             return 0
-        snapshot_id = self._next_prefix_snapshot_id
-        if snapshot_id > 8:
-            raise RuntimeError("executor fixed-prefix snapshot limit exceeded")
+        if self._next_prefix_snapshot_id <= PREFIX_SNAPSHOT_SLOTS:
+            snapshot_id = self._next_prefix_snapshot_id
+            self._next_prefix_snapshot_id += 1
+        else:
+            # The executor holds a fixed number of input snapshots, and the
+            # key is the profile name, so a full cache used to cap how finely
+            # tool disclosure could be split -- and it raised, ending a live
+            # board session over a cache condition. Slide the window instead:
+            # the least recently used slot is overwritten in place, and the
+            # profile that lost it simply re-ingests its prefix the next time
+            # it is selected, which is what every profile did before snapshots
+            # existed.
+            evicted = next(iter(self._prefix_snapshots))
+            snapshot_id = self._prefix_snapshots.pop(evicted)[0]
+            self.last_prefix_metrics["prefix_snapshot_evicted"] = 1
         self._deadline = time.monotonic() + self.timeout
         self._save_input_snapshot(snapshot_id, len(fixed))
         self._prefix_snapshots[str(key)] = (snapshot_id, fixed)
-        self._next_prefix_snapshot_id += 1
         return len(fixed)
 
     def _run(self, model, writes, chains=(), *, publish=True,
@@ -1091,7 +1178,7 @@ class Merged:
     def generate(self, prompt_ids, max_new, eos, *, start=0,
                  kv_in=None, kv_out=None, stop_after=None,
                  capture_dir=None, capture_position=None, on_token=None,
-                 reuse_prefix=False, prefix_snapshot_key=None,
+                 on_prompt=None, reuse_prefix=False, prefix_snapshot_key=None,
                  prefix_snapshot_tokens=()):
         self.last_phase_steps = []
         # A failed wide transaction invalidates the shared resident process,
@@ -1355,6 +1442,8 @@ class Merged:
                 })
                 token = prompt_ids[position + 1]
                 position += 1
+                if on_prompt is not None:
+                    on_prompt(position, len(prompt_ids))
                 continue
 
             src = self._hidden_output(model)
@@ -1732,21 +1821,32 @@ def main() -> int:
                 if runtime_profile else agent.MAX_TOOL_OUTPUT_CHARS
             workspace_tools = agent.WorkspaceTools(
                 args.workspace, max_output_chars=tool_output_limit)
-            system_message = {
-                "role": "system",
-                "content": (
-                    "You are MiniCPM Agent running locally on a Hi3403. "
-                    f"The configured workspace root is {workspace_tools.root}. "
-                    "Use path='.' for that root. Never ask the user for a path "
-                    "that a filesystem tool can inspect. When filesystem facts "
-                    "are requested, call the appropriate tool immediately; do "
-                    "not merely say that you will call it. Inspect before changing, "
-                    "and never claim a tool succeeded unless its response says ok. "
-                    "When a tool response is already present, answer from that "
-                    "evidence instead of announcing or repeating the same call. "
-                    "Summarize tool results and do not repeat long output verbatim. "
-                    "Keep final answers concise."),
-            }
+            # The system prompt is disclosed with the tools, not beside them.
+            # Tool discipline is unreadable advice on a turn that discloses no
+            # tools, and it is not free: the paragraph below is 124 of the 136
+            # tokens a greeting used to spend, or 9.9 s of ingest on ctx1024.
+            SYSTEM_BASE = ("You are MiniCPM Agent running locally on a "
+                           "Hi3403. Keep answers concise.")
+            SYSTEM_TOOLS = (
+                "You are MiniCPM Agent running locally on a Hi3403. "
+                f"The configured workspace root is {workspace_tools.root}. "
+                "Use path='.' for that root. Never ask the user for a path "
+                "that a filesystem tool can inspect. When filesystem facts "
+                "are requested, call the appropriate tool immediately; do "
+                "not merely say that you will call it. Inspect before changing, "
+                "and never claim a tool succeeded unless its response says ok. "
+                "When a tool response is already present, answer from that "
+                "evidence instead of announcing or repeating the same call. "
+                "Summarize tool results and do not repeat long output verbatim. "
+                "Keep final answers concise.")
+
+            def system_for(profile):
+                return {"role": "system",
+                        "content": SYSTEM_TOOLS
+                        if workspace_tools.names_for_profile(profile)
+                        else SYSTEM_BASE}
+
+            system_message = system_for("all")
             messages = [system_message]
             repl_max_new = args.max_new
             thinking_enabled = bool(args.thinking)
@@ -1761,19 +1861,52 @@ def main() -> int:
                 "Agent ready · /help · /tools · /think on|off · "
                 "/context · /clear · /quit")
 
-            def agent_ids(prompt_messages=None):
+            def agent_prompt(prompt_messages=None):
+                """Render the prompt and encode it once, keeping the offsets.
+
+                The offsets are what lets the context ledger say which part of
+                the prompt each token belongs to, and they come free with the
+                encoding the runtime performs anyway.
+                """
+                turn = list(messages if prompt_messages is None
+                            else prompt_messages)
+                if turn and turn[0].get("role") == "system":
+                    turn[0] = system_for(active_schema_profile)
                 rendered = agent.render_chat(
-                    messages if prompt_messages is None else prompt_messages,
+                    turn,
                     workspace_tools.definitions_for_profile(
                         active_schema_profile),
                     add_generation_prompt=True,
                     enable_thinking=thinking_enabled)
-                return list(session.tokenizer.encode(
-                    rendered, add_special_tokens=False).ids)
+                return rendered, session.tokenizer.encode(
+                    rendered, add_special_tokens=False)
+
+            def agent_ids(prompt_messages=None):
+                return list(agent_prompt(prompt_messages)[1].ids)
+
+            # Measured on this board, by this process, from the prompt
+            # positions of every generate call so far.
+            prompt_rate = {"ms": None, "tokens": 0, "total_ms": 0.0}
+
+            def agent_ledger():
+                rendered, encoding = agent_prompt()
+                ids = list(encoding.ids)
+                # What is resident is the COMMON PREFIX of the cache and this
+                # prompt, not the cache length: the cache also holds the
+                # positions generated after the last prompt, and those are not
+                # a prefix of the next one. Using the length would report work
+                # as already paid for that the board is about to redo.
+                resident = session._common_prefix(
+                    getattr(session, "_resident_tokens", ()), ids)
+                return ledger.measure(
+                    rendered, ledger.segment_prompt(rendered),
+                    encoding.offsets, resident_tokens=resident,
+                    prompt_token_ms=prompt_rate["ms"], capacity=args.context,
+                    reserve_tokens=compact_reserve)
 
             def agent_fixed_prefix_ids(profile):
                 rendered = agent.render_chat(
-                    [system_message],
+                    [system_for(profile)],
                     workspace_tools.definitions_for_profile(profile),
                     add_generation_prompt=False,
                     enable_thinking=False)
@@ -1830,8 +1963,8 @@ def main() -> int:
                     continue
                 if spec == "/permissions":
                     ui.info(
-                        "list/read/search/git run automatically; write_file and "
-                        "run_shell require approval every time.")
+                        "list/read/search/git/calculate run automatically; "
+                        "write_file and run_shell require approval every time.")
                     continue
                 if spec == "/think":
                     ui.info(f"thinking={'on' if thinking_enabled else 'off'}")
@@ -1845,13 +1978,16 @@ def main() -> int:
                     continue
                 if spec == "/context":
                     try:
-                        used = len(agent_ids())
+                        record = agent_ledger()
                     except Exception as error:
                         ui.info(f"context inspection failed: {error}")
                     else:
+                        used = record["total_tokens"]
                         ui.info(
                             f"ctx{args.context}: {used} prompt tokens used, "
                             f"{max(0, args.context - used)} available")
+                        for line in ledger.render(record).splitlines():
+                            ui.info(line)
                     continue
                 if spec in {"/clear", "/reset"}:
                     messages[:] = [system_message]
@@ -1970,6 +2106,15 @@ def main() -> int:
                     ui.info(f"{mark} {routed_call.name}: {summary}")
                     initial_tool_rounds = 1
                 turn_finished = False
+                # A model that cannot satisfy a request tends to repeat the
+                # attempt verbatim rather than change it. Every repeat costs a
+                # full prompt ingest and appends its own failure to the
+                # transcript, so the prompt grows while the answer does not:
+                # one measured turn produced the same non-existent tool four
+                # times, 801 to 1185 tokens, 231 s, no result. The host stops
+                # that; spending model rounds to notice it is the expensive
+                # way to learn nothing.
+                attempted_calls = set()
                 for tool_round in range(
                         initial_tool_rounds, args.max_tool_steps + 1):
                     ids = agent_ids(turn_prompt_messages)
@@ -2046,12 +2191,33 @@ def main() -> int:
                                       flush=True)
                                 shown = visible_partial
 
-                    ui.start_wait(
-                        "Planning" if tool_round == 0 else "Using tool result")
+                    stage = ("Planning" if tool_round == 0
+                             else "Using tool result")
+
+                    def ingest_progress(done, total, _stage=stage):
+                        """Turn the silent prompt ingest into a moving line.
+
+                        The board reads a prompt one token at a time, so the
+                        remaining count is the wait, exactly. Reporting the
+                        rate from this ingest alone keeps the estimate right
+                        on any profile without being told which one it is.
+                        """
+                        left = total - done
+                        if left <= 0:
+                            ui.update_wait(f"{_stage} · reading the prompt")
+                            return
+                        elapsed = time.perf_counter() - ingest_started
+                        rate = elapsed / done if done else 0.0
+                        ui.update_wait(
+                            f"{_stage} · read {done}/{total} prompt tokens"
+                            + (f" · {left * rate:.0f}s left" if rate else ""))
+
+                    ui.start_wait(stage)
+                    ingest_started = time.perf_counter()
                     try:
                         reason, out, steps = session.generate(
                             ids, limit, {1, 130073}, start=0,
-                            on_token=agent_stream,
+                            on_token=agent_stream, on_prompt=ingest_progress,
                             reuse_prefix=args.reuse_session_kv,
                             prefix_snapshot_key=(
                                 active_schema_profile
@@ -2069,6 +2235,8 @@ def main() -> int:
                         "prompt_tokens_new": len(ids),
                         "prompt_tokens_replayed": 0,
                         "prefix_cache_hit": 0})
+                    observe_prompt_token_ms(
+                        getattr(session, "last_phase_steps", ()), prompt_rate)
                     turn_prefix_metrics["prompt_tokens_new"] += \
                         prefix_metrics["prompt_tokens_new"]
                     turn_prefix_metrics["prompt_tokens_replayed"] += \
@@ -2091,6 +2259,16 @@ def main() -> int:
                     except agent.ToolProtocolError as error:
                         if prefix_shown:
                             print("", flush=True)
+                        if not workspace_tools.names_for_profile(
+                                active_schema_profile):
+                            # A turn planned without a schema has no calling
+                            # template to copy, so a malformed call is evidence
+                            # that the plan needed one.
+                            active_schema_profile = "read_only"
+                            ui.info(
+                                "Tool call attempted without a disclosed "
+                                "schema; disclosing read-only tools.")
+                            continue
                         ui.info(f"Invalid tool call: {error}")
                         break
 
@@ -2108,6 +2286,11 @@ def main() -> int:
                                 "final text.")
                         ui.turn_summary(len(out), generated_steps, reason)
                         messages.append({"role": "assistant", "content": final_text})
+                        try:
+                            ui.context_summary(agent_ledger())
+                        except Exception:
+                            # Accounting must never take a turn down with it.
+                            pass
                         results.append({
                             "mode": "agent", "prompt": spec,
                             "text": final_text, "ids": out, "reason": reason,
@@ -2145,6 +2328,34 @@ def main() -> int:
                         print("", flush=True)
                     if visible and not prefix_shown:
                         ui.info(visible)
+                    widened = workspace_tools.escalate_schema_profile(
+                        active_schema_profile,
+                        tuple(call.name for call in calls))
+                    if widened is not None:
+                        # The model asking for a tool is better evidence of
+                        # intent than any keyword. Re-plan with it disclosed;
+                        # the rejected plan never enters the transcript.
+                        active_schema_profile = widened
+                        ui.info(
+                            f"Disclosing the {widened} tool schema and "
+                            "re-planning; approval is still required per call.")
+                        continue
+                    # Repeat detection belongs after widening: re-planning
+                    # the same call with the tool now disclosed is the
+                    # designed recovery, not a loop. What is a loop is the
+                    # same call being executed twice with the same arguments
+                    # and the same schema.
+                    signature = tuple(
+                        (call.name, tuple(sorted(call.arguments.items())))
+                        for call in calls)
+                    if signature in attempted_calls:
+                        ui.info(
+                            "The same tool call was produced again; stopping "
+                            "this turn rather than repeating it.")
+                        final_text = visible or raw
+                        turn_finished = True
+                        break
+                    attempted_calls.add(signature)
                     messages.append({"role": "assistant", "content": raw})
                     for call in calls:
                         preview = workspace_tools.preview(call)

@@ -74,12 +74,35 @@ Example decision:
    complete without a model or tool.
 2. Explicit display/list/read/search/status requests use deterministic
    read-only tools and return their structured result directly.
-3. Requests containing summarize, explain, compare, diagnose or recommend run
+3. Requests for a numeric value are split by what the model computes
+   correctly. Its algebra is exact on the board — it reproduces
+   `2 x 0.8808 = 1.7616` in 14 tokens — so short arithmetic stays with it,
+   while transcendental, high-precision and large-magnitude work is dispatched
+   to `calculate`: deterministically when the turn is nothing but the
+   expression and no other reading fits it, otherwise by disclosing that one
+   tool. A turn that also names a file or a mutation keeps that intent; the
+   arithmetic branch is a direct route, so anything it swallows is swallowed
+   silently.
+4. Requests containing summarize, explain, compare, diagnose or recommend run
    the necessary tool and send only its compact evidence to MiniCPM5.
-4. Ambiguous multi-step tasks use MiniCPM5's native XML tool-call contract as a
+5. Ambiguous multi-step tasks use MiniCPM5's native XML tool-call contract as a
    planner. The host validates every call.
-5. Mutation, shell and future network tools retain explicit permission policy;
+6. Mutation, shell and future network tools retain explicit permission policy;
    routing never grants authority.
+
+A turn that gives evidence for none of these discloses no tool schema at all
+rather than the whole registry. On the measured ctx1024 board the whole
+registry was 675 fixed-prefix tokens when it held eight tools, and adding
+`calculate` moved it to 742; prompt ingestion runs at 79.5 ms/token, so the old
+fallback spent the better part of a minute before the first generated token —
+on greetings included. Under-disclosure is recoverable in one widening round
+(§3); over-disclosure is charged on every turn.
+
+Widening resolves towards least privilege before fewest tools. Ranking by size
+alone tied a four-tool write profile with a four-tool shell profile, and a
+model asking to read a file from a turn that had disclosed nothing was handed
+`run_shell`. Disclosure is not authorization, but it is still the wrong
+direction to widen in.
 
 ## 3. Tool registry and progressive disclosure
 
@@ -91,12 +114,29 @@ filesystem-read  list_directory, read_file, search_text
 git-read         git_status and future diff/log tools
 filesystem-write write_file
 shell            run_shell
+compute          calculate
 ```
+
+`compute` is a group of its own because `calculate` reaches no filesystem path
+and starts no subprocess: it evaluates a closed expression language in-process
+over a fixed function table, so it is auto-approved like the read groups while
+belonging to neither. Disclosure is never authorization — `write_file` and
+`run_shell` ask the operator on every call, whichever profile names them.
 
 Only the relevant group is rendered into the model prompt. `MODEL_ONLY`
 requests receive no tool schema. Direct routes execute without rendering any
 schema. Tool results use typed metadata, a compact preview and a stable result
 identifier; large evidence is paged instead of copied into the conversation.
+
+Narrow disclosure is repairable. When the model calls a tool the current
+profile does not name, `escalate_schema_profile` returns the narrowest profile
+that keeps every already-disclosed tool and adds the requested one, and the
+turn is replanned once, so a transcript never loses a schema it has used. That
+recovery round is what makes the empty schema safe as a default. `calculate`
+rides with the read groups rather than splitting them, because a
+read-then-compute turn needs both and a per-filesystem-combination profile
+would exceed the executor's eight fixed-prefix snapshot ids; the measured price
+is +67 fixed-prefix tokens (+5.3 s) on the read-bearing profiles.
 
 ## 4. Runtime-profile contract
 
@@ -222,8 +262,11 @@ The current implementation lazily creates one fixed-prefix snapshot per tool
 schema. Generic executor opcodes save and restore explicit resident-input
 ranges; the MiniCPM adapter maps a prefix token count to 96 contiguous channel
 ranges across the two packed KV inputs. Each snapshot is capped at 64 MiB, the
-process budget is 128 MiB, and at most eight snapshots exist. All limits fail
-closed. The feature is enabled by default for Agent after a Hi3403 board A/B
+process budget is 128 MiB, and eight snapshot slots exist. The size limits
+fail closed. The slot count does not: it is a cache, and a ninth profile
+evicts the least recently used entry rather than ending the session, which
+also stops the executor's slot count from capping how finely tool disclosure
+may be split. The feature is enabled by default for Agent after a Hi3403 board A/B
 restored a 137-token prefix in `1.76 ms`, preserved exact token IDs and text,
 and reduced the repeated 32-token request from `26.97 s` to `12.56 s`
 (`53.4%`). `FIXED_PREFIX_SNAPSHOTS=0` retains a full-replay diagnostic path.

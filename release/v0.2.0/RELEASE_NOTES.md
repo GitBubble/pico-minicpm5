@@ -67,9 +67,12 @@ logits.
 
 ## Also in this release
 
-- A recorded board agent session on the project and app homepages, rendered to
-  a self-contained animated SVG. Waits play at `4.5x` with the compression
-  stated on screen and the board's own clock on every frame.
+- A recorded four-turn agent session on the project and app homepages, played
+  at the speed it ran: a greeting answered in `3.2 s`, a file written under
+  explicit approval, the listing that confirms the write in `2.1 ms`, and
+  `swish(2)` computed exactly in `0.7 ms`. Nothing is sped up or cut, and the
+  one slow turn reports its own remaining prompt tokens rather than hiding
+  behind a spinner.
 - [`docs/QUANTIZATION_CONTRACT.md`](../../docs/QUANTIZATION_CONTRACT.md):
   what a `Clip` does to ATC's IFMR range search, why position zero needs its
   own calibration family (the layer-0 MLP branch, not attention), and one

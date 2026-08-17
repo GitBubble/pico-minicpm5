@@ -59,8 +59,10 @@ donor 零扩展而非原生，且中文 oracle、内存包络、长 prompt 三�
 
 ## 本版还包含
 
-- 项目首页与 app 首页上的板端 agent 真实会话录制，渲染为自包含动画 SVG。等待段
-  按 `4.5x` 播放且压缩倍率写在画面上，每一帧右下角是板子自己的墙钟。
+- 项目首页与 app 首页上的四轮 agent 真实会话录制，按它运行的速度播放：问候在
+  `3.2 s` 得到回答、一次经显式批准的写文件、`2.1 ms` 的目录列举用来验证该写入，
+  以及 `0.7 ms` 精确算出的 `swish(2)`。没有加速也没有剪辑；唯一慢的那一轮会
+  自己报出剩余的 prompt token 数，而不是躲在一个转圈的图标后面。
 - [`docs/QUANTIZATION_CONTRACT.zh-CN.md`](../../docs/QUANTIZATION_CONTRACT.zh-CN.md)：
   `Clip` 对 ATC 的 IFMR 量程搜索做了什么、position 0 为什么需要自己的标定 family
   （是 layer-0 的 MLP 分支，不是 attention），以及一条被广泛复述、却被它自己的

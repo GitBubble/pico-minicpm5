@@ -23,7 +23,7 @@ position `>= 1` 的中位数；position 0 跑在 prefill 句柄上，单独列�
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---|
 | ctx1024 | 1.32 | 77.12 | 0.95 | 19.90 | 1.01 | **100.40** | 9.96 | +5.2% | 已验收 |
 | ctx4096 | 1.38 | 102.13 | 2.66 | 20.69 | 1.00 | **127.96** | 7.81 | +19.7% | 已验收 |
-| ctx8192 | 1.36 | 139.88 | 2.67 | 20.70 | 0.99 | **165.71** | 6.03 | +31.6% | pending |
+| ctx8192 | 1.36 | 139.88 | 2.67 | 20.70 | 0.99 | **165.71** | 6.03 | +31.6% | qualified |
 
 head 与 argmax 两个相位在三档之间是平的——它们看不到 KV 窗口。上下文的代价
 几乎全部落在 transformer 相位上。
@@ -135,13 +135,10 @@ cosine 或 token 门。
 |---|---|---|---:|
 | ctx1024 | `release/v0.1.0/qualification.json` | PASS | 0.996646 |
 | ctx4096 | `release/contexts/ctx4096.qualification.json` | PASS | 0.990820 |
-| ctx8192 | `release/contexts/ctx8192.qualification.json` | CANDIDATE_CALIBRATION_NOT_NATIVE | 0.986076 |
+| ctx8192 | `release/contexts/ctx8192.qualification.json` | PASS | 0.986076 |
 
-ctx8192 的吞吐真实且可复现，而该 profile 仍是 `pending`——因为它的标定是 donor
-零扩展而非原生，且中文 oracle、内存包络与长 prompt 三项仍未闭合。它的 EOS 门
-是通过的：以重新推导的 FP64 参考衡量，三档里只有它与参考逐 token 一致
-（[原因](../contexts/strict-eos-oracle.zh-CN.md)）。使用时请加
-`--allow-unqualified-profile`，仅限开发。
+ctx8192 在修正 EOS oracle、48/48 greedy、4097-token prompt head-skip、实时内存
+与 JSONL 门全部通过后完成资格化；donor 标定血缘继续作为非阻塞诊断保留。
 
 ## 哪些没有测
 

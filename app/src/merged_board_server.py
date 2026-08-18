@@ -50,11 +50,33 @@ import minicpm_profile as profile_contract  # noqa: E402
 import context_ledger as ledger  # noqa: E402
 import minicpm_prefill_schedule as prefill_schedule  # noqa: E402
 import minicpm_prefill_runtime as prefill_runtime_contract  # noqa: E402
+import eager_prefill  # noqa: E402
+import eager_agent  # noqa: E402
+import eager_server  # noqa: E402
 
 HIDDEN, KV_HEADS, HEAD_DIM, LAYERS = gc.HIDDEN, gc.KV_HEADS, gc.HEAD_DIM, gc.LAYERS
 #: Input snapshots the persistent executor can hold at once.
 PREFIX_SNAPSHOT_SLOTS = 8
 CHANNELS = LAYERS * KV_HEADS
+
+# Release-qualified synthesized decode workspace tails.  Input[5] is the ACL
+# control tensor and input[6] is retained after its allocator zero-fill.  Keep
+# this table closed: a context or descriptor that is not listed must use the
+# default executor allocation path.
+WORKSPACE_RETENTION_CONTRACTS = {
+    8192: (7, 352, 206_127_104),
+    10240: (7, 352, 257_638_400),
+    16384: (7, 352, 412_188_672),
+}
+
+
+def _workspace_retention_executor_args(context):
+    _inputs, _control_bytes, workspace_bytes = \
+        WORKSPACE_RETENTION_CONTRACTS[context]
+    return (
+        "--no-cache-model", "0",
+        "--retain-input", f"0:6:5:{workspace_bytes}",
+    )
 
 
 def observe_prompt_token_ms(phase_steps, observed):
@@ -475,12 +497,12 @@ class TerminalUI:
         print(self.paint(text, "2;38;5;244"), flush=True)
 
 
-class Merged:
+class Merged(eager_server.EagerSessionMixin):
     def __init__(self, *, executable, decode, prefill, head, library_paths,
                  embedding, context, timeout, tokenizer=None,
                  resident_kv=True, quiet_executor=False,
                  transformer_output_slots=None, prefill_runtime=None,
-                 prefill_context=None):
+                 prefill_context=None, retain_decode_workspace=False):
         if prefill_context is None:
             prefill_context = context
         if prefill_context > context or prefill_context < 2:
@@ -528,6 +550,15 @@ class Merged:
         self.timeout = timeout
         self.row_f16 = HEAD_DIM * 2
         self.cache_bytes = CHANNELS * self.past * HEAD_DIM * 2
+        self.retain_decode_workspace = bool(retain_decode_workspace)
+        if self.retain_decode_workspace \
+                and self.context not in WORKSPACE_RETENTION_CONTRACTS:
+            qualified = ", ".join(
+                f"ctx{value}" for value in sorted(
+                    WORKSPACE_RETENTION_CONTRACTS))
+            raise RuntimeError(
+                "decode workspace retention requires a qualified context "
+                f"({qualified})")
         self.prefill_cache_bytes = (
             CHANNELS * (prefill_context - 1) * HEAD_DIM * 2)
         self.embed = open(embedding, "rb")
@@ -566,13 +597,20 @@ class Merged:
                 runner=Path(runner.__file__).resolve(),
             )
             try:
+                executor_args = (
+                    _workspace_retention_executor_args(self.context)
+                    if self.retain_decode_workspace else ())
                 self.process = probe._start(
                     executable, self.models, library_paths, 0,
-                    quiet=quiet_executor)
+                    quiet=quiet_executor,
+                    extra_executor_args=executor_args)
             except TypeError as error:
                 # A board may retain the pre-UI helper while only the REPL
                 # server is refreshed. Keep that partial upgrade runnable.
-                if "unexpected keyword argument 'quiet'" not in str(error):
+                legacy_keyword = any(
+                    f"unexpected keyword argument '{name}'" in str(error)
+                    for name in ("quiet", "extra_executor_args"))
+                if self.retain_decode_workspace or not legacy_keyword:
                     raise
                 if quiet_executor:
                     saved_stderr = os.dup(2)
@@ -609,6 +647,7 @@ class Merged:
             self.startup_ms["executor_ready"] = (
                 ready_at - spawned_at) * 1000.0
             self._validate_context_descriptors()
+            self._validate_workspace_retention_contract()
             prefill_runtime.validate_loaded_handlers(
                 self.descriptors, self.models)
             probe_started = time.perf_counter()
@@ -769,6 +808,24 @@ class Merged:
                     f"ctx{window}; mask/rope/k/v={observed}, "
                     f"expected={expected}")
 
+    def _validate_workspace_retention_contract(self):
+        """Bind workspace retention to the exact live model-0 ACL ABI."""
+        if not self.retain_decode_workspace:
+            return
+        inputs, _outputs = self.descriptors[self.decode_index]
+        count, control_bytes, workspace_bytes = \
+            WORKSPACE_RETENTION_CONTRACTS[self.context]
+        if len(inputs) != count:
+            raise RuntimeError(
+                f"ctx{self.context} workspace retention requires exactly "
+                f"{count} decode inputs, got {len(inputs)}")
+        observed = (inputs[5], inputs[6])
+        expected = (control_bytes, workspace_bytes)
+        if observed != expected:
+            raise RuntimeError(
+                f"ctx{self.context} workspace retention decode tail "
+                f"{observed} != {expected}")
+
     def _bind_output_slots(self, slots):
         values = tuple(slots)
         if len(values) != 3 or any(type(value) is not int for value in values) \
@@ -806,6 +863,20 @@ class Merged:
             "prefix_snapshot_restore_ms": 0.0,
             "prefix_snapshot_evicted": 0,
         }
+
+    def _attention_mask_bytes(self, position, mask_width):
+        """Causal mask for one S1 row at ``position``.
+
+        Shared by ``generate``'s prompt-ingestion branch and by the eager
+        prefill path (``eager_server.EagerSessionMixin.prefill_extend``) so
+        the two cannot drift: an eager row must be byte-identical to the row
+        the non-eager path would have written at the same position.
+        """
+        mask = bytearray(struct.pack("<f", gc.MASK_NEG) * mask_width)
+        for slot in range(position):
+            struct.pack_into("<f", mask, slot * 4, 0.0)
+        struct.pack_into("<f", mask, (mask_width - 1) * 4, 0.0)
+        return bytes(mask)
 
     def _prefix_plan(self, prompt_ids, reuse_prefix):
         previous = tuple(self._resident_tokens)
@@ -935,15 +1006,23 @@ class Merged:
         return len(fixed)
 
     def _run(self, model, writes, chains=(), *, publish=True,
-             output_count=None):
+             output_count=None, public_inputs=None):
         desc_in, desc_out = self.descriptors[model]
         if output_count is None:
             output_count = 2 if publish else 0
         if output_count < 0 or output_count > len(desc_out):
             raise ValueError(f"invalid output_count {output_count}")
+        # Five is the canonical transformer handle's public-input count; a
+        # native windowed-attention container declares its own (hidden + N
+        # window records) and must not be truncated to it.
+        if public_inputs is None:
+            public_inputs = min(5, len(desc_in))
+        elif type(public_inputs) is not int \
+                or not 1 <= public_inputs <= len(desc_in):
+            raise ValueError(f"invalid public_inputs {public_inputs}")
         output_sizes = tuple(desc_out[:output_count])
         runner._write_all(self.process.stdin, gc._frame(
-            model, min(5, len(desc_in)), output_sizes, writes, chains))
+            model, public_inputs, output_sizes, writes, chains))
         self.process.stdin.flush()
         return self._respond(output_sizes, model)
 
@@ -972,6 +1051,55 @@ class Merged:
     def wide_publish_kv(self, *, spec, start):
         self._require_live_wide_session()
         self._scatter_kv_rows(spec.model_index, start, spec.width)
+
+    def windowed_kv_execute(self, *, spec, writes, output_count=0):
+        """Execute one native windowed-attention container, fail-closed on ABI.
+
+        The declared per-window KV size is re-checked against the LIVE ready
+        descriptor immediately before the frame is written.  This is not
+        belt-and-braces: the three known ABIs (4,194,304 / 2,097,152 / 262,144
+        B per window) are numerically identical containers, so feeding the
+        wrong one produces a container that executes and returns plausible
+        garbage rather than an error.
+        """
+        self._require_live_wide_session()
+        if not isinstance(
+                spec, prefill_runtime_contract.WindowedKVHandleSpec):
+            raise RuntimeError(
+                "windowed KV execute requires a WindowedKVHandleSpec")
+        if not 0 <= spec.model_index < len(self.models):
+            raise RuntimeError("windowed KV model index is out of range")
+        spec.verify_loaded_descriptor(self.descriptors[spec.model_index])
+        declared = spec.kv.kv_input_slots
+        seen = tuple(write.input_slot for write in writes)
+        if len(set(seen)) != len(seen) or not set(declared) <= set(seen):
+            raise RuntimeError(
+                "windowed KV execute must write every declared window slot "
+                "exactly once")
+        window_bytes = spec.kv.abi.bytes_per_window
+        for write in writes:
+            if write.input_slot in declared and len(write.payload) != window_bytes:
+                raise RuntimeError(
+                    f"windowed KV slot {write.input_slot} payload is "
+                    f"{len(write.payload)} B; the bound container declares "
+                    f"{spec.kv.abi.describe()}")
+        payload_writes = tuple(
+            (write.input_slot, write.offset, write.payload)
+            for write in writes)
+        # The fused rung leaves its window contexts device-resident
+        # (``output_count=0``).  The single-layer rung still hands them back to
+        # the host, so the count is declared by the caller, not assumed.
+        if type(output_count) is not int or output_count < 0 \
+                or output_count > len(spec.output_bytes):
+            raise RuntimeError("windowed KV output count is out of range")
+        outputs = self._run(
+            spec.model_index, payload_writes, publish=False,
+            output_count=output_count,
+            public_inputs=spec.public_input_count)
+        if len(outputs) != output_count:
+            raise RuntimeError(
+                "windowed KV execute returned an unexpected output count")
+        return outputs
 
     def wide_discard_session(self, *, spec, stage, error):
         """Poison the complete resident table after any wide-path failure.
@@ -1357,13 +1485,9 @@ class Merged:
             # bootstraps a longer decode context).
             mask_width = (
                 prefill_window if position == 0 else self.context)
-            mask = bytearray(struct.pack("<f", gc.MASK_NEG) * mask_width)
-            for slot in range(position):
-                struct.pack_into("<f", mask, slot * 4, 0.0)
-            struct.pack_into("<f", mask, (mask_width - 1) * 4, 0.0)
 
             writes = [(0, 0, self._hidden_input(token, desc_in[0])),
-                      (1, 0, bytes(mask)),
+                      (1, 0, self._attention_mask_bytes(position, mask_width)),
                       (2, 0, self._rope_matrix_bytes(position))]
             if host_kv and position <= 1:
                 # position 0's caches are genuinely zero; position 1 is the
@@ -1538,7 +1662,8 @@ def main() -> int:
     ap.add_argument("--head-model", type=Path)
     ap.add_argument(
         "--profile",
-        help="runtime profile name or JSON path (ctx128/1024/4096/8192)")
+        help="runtime profile name or JSON path "
+             "(ctx128/1024/4096/8192/10240/16384)")
     ap.add_argument(
         "--deployment-root", type=Path, default=HERE.parent.parent,
         help="root used to resolve model paths in a runtime profile")
@@ -1590,6 +1715,11 @@ def main() -> int:
         "--thinking", action="store_true",
         help="start agent mode with model thinking enabled")
     ap.add_argument(
+        "--eager-tool-prefill", action="store_true",
+        help="agent mode: prefill the streaming tool output while the tool is "
+             "still running (default off; requires resident KV and "
+             "--reuse-session-kv)")
+    ap.add_argument(
         "--workspace", type=Path, default=Path.cwd(),
         help="filesystem boundary for agent tools (default: current directory)")
     ap.add_argument(
@@ -1614,6 +1744,7 @@ def main() -> int:
     ap.add_argument("--capture-position", type=int)
     args = ap.parse_args()
     runtime_profile = None
+    retain_decode_workspace = False
     mode = "agent" if args.agent else "chat" if args.chat else "completion"
     if args.profile:
         try:
@@ -1662,6 +1793,8 @@ def main() -> int:
                 f"{runtime_profile.name}: expected "
                 f"{','.join(map(str, profile_slots))}")
         args.transformer_output_slots = profile_slots
+        retain_decode_workspace = (
+            runtime_profile.context in WORKSPACE_RETENTION_CONTRACTS)
     else:
         args.context = 1024 if args.context is None else args.context
         args.prefill_context = args.context
@@ -1679,6 +1812,16 @@ def main() -> int:
         ap.error("--fixed-prefix-snapshots requires --agent")
     if args.fixed_prefix_snapshots and not args.reuse_session_kv:
         ap.error("--fixed-prefix-snapshots requires --reuse-session-kv")
+    # Eager tool prefill appends rows to the RESIDENT prefix and they are only
+    # ever consumed by a following generate(..., reuse_prefix=True). Without
+    # either half the eager work is silently discarded -- correct, but it buys
+    # the added complexity nothing. Refuse loudly here, at startup.
+    if args.eager_tool_prefill and not args.agent:
+        ap.error("--eager-tool-prefill requires --agent")
+    if args.eager_tool_prefill and args.host_kv:
+        ap.error("--eager-tool-prefill requires resident KV; drop --host-kv")
+    if args.eager_tool_prefill and not args.reuse_session_kv:
+        ap.error("--eager-tool-prefill requires --reuse-session-kv")
     if (args.capture_dir is None) != (args.capture_position is None):
         ap.error("--capture-dir and --capture-position must be provided together")
     if args.capture_position is not None and args.capture_position < 0:
@@ -1738,11 +1881,23 @@ def main() -> int:
                          transformer_output_slots=args.transformer_output_slots,
                          prefill_runtime=prefill_runtime,
                          prefill_context=args.prefill_context,
+                         retain_decode_workspace=retain_decode_workspace,
                          quiet_executor=(args.interactive or args.chat or args.agent)
                          and not args.verbose_executor)
     finally:
         ui.stop_wait()
     load_ms = (time.perf_counter() - began) * 1000.0
+    if args.eager_tool_prefill:
+        # Second, non-negotiable gate: the CLI checks the flags, this checks
+        # the session actually built from them (a profile or a future default
+        # could still land here without resident KV or without the session
+        # protocol). Refusing at startup beats degrading at round 3.
+        try:
+            eager_prefill.require_preconditions(
+                session=session, reuse_prefix=args.reuse_session_kv,
+                agent_mode=args.agent)
+        except eager_prefill.EagerPreconditionError as error:
+            ap.error(str(error))
     if args.interactive or args.chat or args.agent:
         ui.ready(len(session.models), load_ms / 1000.0)
         startup = getattr(session, "startup_ms", None)
@@ -1904,6 +2059,15 @@ def main() -> int:
                     prompt_token_ms=prompt_rate["ms"], capacity=args.context,
                     reserve_tokens=compact_reserve)
 
+            def agent_encode(text):
+                """Tokenizer view handed to the eager feeder.
+
+                Must be the SAME encode call agent_ids uses, or a fed prefix
+                could differ from the prompt it is meant to be a prefix of.
+                """
+                return list(session.tokenizer.encode(
+                    text, add_special_tokens=False).ids)
+
             def agent_fixed_prefix_ids(profile):
                 rendered = agent.render_chat(
                     [system_for(profile)],
@@ -2038,6 +2202,46 @@ def main() -> int:
                     "context_tokens_before": 0,
                     "context_tokens_after": 0,
                     "context_turns_compacted": 0}
+                eager_engine = None
+                eager_reports = []
+                turn_eager_metrics = {
+                    "eager_enabled": bool(args.eager_tool_prefill),
+                    "eager_rounds": eager_reports,
+                    "eager_tokens_fed_eagerly": 0,
+                    "eager_managed_rollbacks": 0,
+                    "eager_failclosed": 0,
+                    "eager_finalize_ms": 0.0}
+
+                def finalize_eager(prompt_ids):
+                    """Join the feeder and verify BEFORE generate consumes."""
+                    nonlocal eager_engine
+                    if eager_engine is None:
+                        return
+                    engine, eager_engine = eager_engine, None
+                    engine.finalize(prompt_ids)
+                    report = engine.report()
+                    report["tool_round"] = len(eager_reports)
+                    eager_reports.append(report)
+                    turn_eager_metrics["eager_tokens_fed_eagerly"] += \
+                        report["tokens_fed_eagerly"]
+                    turn_eager_metrics["eager_managed_rollbacks"] += \
+                        report["managed_rollbacks"]
+                    turn_eager_metrics["eager_failclosed"] += \
+                        int(report["failclosed"])
+                    turn_eager_metrics["eager_finalize_ms"] += \
+                        report["finalize_ms"]
+                    detail = (
+                        f"eager: fed={report['tokens_fed_eagerly']} "
+                        f"rollbacks={report['managed_rollbacks']} "
+                        f"finalize={report['finalize_ms']:.1f} ms")
+                    if report["failclosed"]:
+                        detail += (
+                            f" · FAIL-CLOSED {report['reason']} "
+                            f"recovery={report['recovery']} "
+                            f"rewound_to={report['rewound_to']} "
+                            f"common_prefix_len={report['common_prefix_len']}")
+                    ui.info(detail)
+
                 if route_decision is not None:
                     if len(route_decision.tool_calls) != 1:
                         raise RuntimeError(
@@ -2078,6 +2282,7 @@ def main() -> int:
                             "route_ms": route_ms, "tool_ms": tool_total_ms,
                             "model_called": False, "total_ms": total_ms,
                             **turn_prefix_metrics,
+                            **turn_eager_metrics,
                         })
                         continue
                     active_schema_profile = (
@@ -2153,6 +2358,12 @@ def main() -> int:
                             ui.info(
                                 f"Context rebased: {before}→{len(ids)} tokens; "
                                 f"{best_info['turns_compacted']} older turns compacted.")
+                    # The prompt is final here (compaction may have rewritten
+                    # it). Verify the eagerly fed prefix against it and fail
+                    # closed BEFORE anything consumes the resident cache --
+                    # including the context-full break below.
+                    finalize_eager(ids)
+
                     if len(ids) >= args.context - 8:
                         ui.info(
                             f"Context full ({len(ids)}/{args.context}); "
@@ -2313,6 +2524,7 @@ def main() -> int:
                             "model_called": True,
                             **turn_prefix_metrics,
                             **turn_rebase_metrics,
+                            **turn_eager_metrics,
                             "total_ms": (
                                 time.perf_counter() - turn_started) * 1000.0,
                         })
@@ -2357,14 +2569,35 @@ def main() -> int:
                         break
                     attempted_calls.add(signature)
                     messages.append({"role": "assistant", "content": raw})
-                    for call in calls:
+                    for call_index, call in enumerate(calls):
                         preview = workspace_tools.preview(call)
                         ui.info(f"⚙ {preview}")
+                        # Only the LAST call of a round is streamed: the eager
+                        # feed has to end at the prompt the next generate will
+                        # consume, and any further call would rewrite its tail.
+                        stream_this_call = (
+                            args.eager_tool_prefill
+                            and call_index == len(calls) - 1
+                            and eager_agent.eligible(call))
                         tool_started = time.perf_counter()
-                        tool_result = workspace_tools.execute(
-                            call, approve=approve_tool,
-                            allowed_names=workspace_tools.names_for_profile(
-                                active_schema_profile))
+                        if stream_this_call:
+                            tool_result, eager_engine, _planner = \
+                                eager_agent.run_tool_call_with_eager_prefill(
+                                    session=session, encode=agent_encode,
+                                    workspace_tools=workspace_tools,
+                                    call=call, messages=messages,
+                                    tool_definitions=workspace_tools
+                                    .definitions_for_profile(
+                                        active_schema_profile),
+                                    enable_thinking=thinking_enabled,
+                                    approve=approve_tool,
+                                    allowed_names=workspace_tools
+                                    .names_for_profile(active_schema_profile))
+                        else:
+                            tool_result = workspace_tools.execute(
+                                call, approve=approve_tool,
+                                allowed_names=workspace_tools.names_for_profile(
+                                    active_schema_profile))
                         tool_total_ms += (
                             time.perf_counter() - tool_started) * 1000.0
                         messages.append({
@@ -2374,10 +2607,15 @@ def main() -> int:
                         mark = "✓" if decoded["ok"] else "✗"
                         summary = decoded["output"].splitlines()[0][:160]
                         ui.info(f"{mark} {call.name}: {summary}")
+                if eager_engine is not None:
+                    # Defensive: no break above should leave a feeder running,
+                    # but a live worker must never outlive the tool loop.
+                    finalize_eager(agent_ids())
                 if not turn_finished:
                     results.append({"mode": "agent", "prompt": spec,
                                     "reason": "agent_incomplete",
-                                    "schema_profile": active_schema_profile})
+                                    "schema_profile": active_schema_profile,
+                                    **turn_eager_metrics})
         if args.chat:
             messages = []
             repl_max_new = args.max_new

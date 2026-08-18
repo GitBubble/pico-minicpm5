@@ -120,7 +120,7 @@
     "context_boundary": {
       "position": 8192,
       "rejected_before_model_load": true,
-      "stderr_artifact_bound": false
+      "stderr_artifact_bound": true
     },
     "board_load": {
       "handles": 3
@@ -135,6 +135,18 @@
     "calibration": {
       "mode": "source-donor-zero-extend",
       "native_c8192_calibration": false
+    },
+    "long_prompt_head_skip": {
+      "prompt_tokens": 4097,
+      "head_calls_skipped": 4096,
+      "head_calls_run": 1,
+      "next_token_exact": true,
+      "ingest_seconds": 602.477
+    },
+    "jsonl_service": {
+      "protocol": "pico.minicpm5.runner.v1",
+      "retained_workspace": true,
+      "status": "PASS"
     }
   },
   "diagnostics_nonblocking": {
@@ -147,16 +159,16 @@
     "eos_history": "carried FAIL_STRICT_SEQUENCE_MISMATCH until 2026-08-17; the failure was in the expectation, not the artifact"
   },
   "evidence": {
-    "source_record": "MINICPM5_CONTEXT8192_QUALIFICATION.json",
-    "source_sha256": "14cd2620a3c0dfaf48692f6a2ec2684745611e1693c635dcae549f643a91739b",
-    "location": "integration monorepo; evidence artifacts are not distributed in this repository"
+    "source_record": "ctx8192.acceptance-20260818.json",
+    "source_sha256": "103bfce2acc83fffc53ca459a6a65a91b31540aae0ed0ee69e77368f2c1de474",
+    "location": "release/contexts; raw board captures remain owner-held"
   },
   "verdict": {
     "public_output_numeric": "PASS",
     "greedy_exact": "PASS",
     "eos": "PASS",
-    "context_boundary": "PASS_JSON_FIELDS_ONLY",
+    "context_boundary": "PASS",
     "board_load": "PASS",
-    "overall": "CANDIDATE_CALIBRATION_NOT_NATIVE"
+    "overall": "PASS"
   }
 }

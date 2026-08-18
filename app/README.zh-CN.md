@@ -28,7 +28,7 @@ README。直接运行不需要重新导出 ONNX、不需要
 │   ├── lib/{libsvp_acl.so,libsvp_aicpu.so,libprotobuf-c.so.1,libsecurec.so}
 │   ├── bin/pico_persistent_acl_executor.aarch64
 │   ├── native/{Makefile,pico_persistent_acl_executor.c}
-│   ├── profiles/{ctx128,ctx1024,ctx4096,ctx8192}.json
+│   ├── profiles/{ctx128,ctx1024,ctx4096,ctx8192,ctx10240,ctx16384}.json
 │   └── src/{merged_board_server.py,minicpm_agent.py,
 │            minicpm_profile.py,
 │            pico_minicpm5_split_board_runner.py,probe_om_execute_latency.py,
@@ -36,7 +36,9 @@ README。直接运行不需要重新导出 ONNX、不需要
 ├── models/{prefill.om,decode.om,head_flat.om}          # 已验收 ctx1024
 ├── models/ctx128/{prefill.om,decode.om}                # 验收后放入
 ├── models/ctx4096/decode.om                            # 已验收；prefill 共享 models/prefill.om
-├── models/ctx8192/decode.om                            # pending（标定非原生）；prefill 同上共享
+├── models/ctx8192/decode.om                            # 已资格化；prefill 同上共享
+├── models/ctx10240/decode.om                           # pending；prefill 同上共享
+├── models/ctx16384/decode.om                           # pending；prefill 同上共享
 └── assets/{token_embedding.f16.bin,tokenizer.json}
 ```
 
@@ -65,6 +67,7 @@ chmod +x app/*.sh app/bin/pico_persistent_acl_executor.aarch64
 # 显式选择 profile；ctx128 仅支持 Chat
 ./app/chat.sh --profile ctx128
 ./app/agent.sh --profile ctx4096
+CONTEXT_PROFILE=ctx8192 ./app/agent.sh
 ```
 
 ```text
@@ -266,9 +269,9 @@ make SDK_ROOT=/path/to/sdk/smp/a55_linux/mpp/out CC=aarch64-mix210-linux-gcc
 
 完整 runtime profile 与混合路由契约见源码仓库中的
 [Agent 路由与运行时 Context Profile 设计](https://github.com/GitBubble/pico-minicpm5/blob/main/docs/AGENT_ROUTING_AND_CONTEXT_PROFILES.zh-CN.md)。
-ctx128 明确只支持 Chat；ctx4096/ctx8192 在对应 OM 完成 descriptor、数值
-（`>0.98`）和板端门禁前保持 pending，受控开发测试必须显式添加
-`--allow-unqualified-profile`。
+ctx128 明确只支持 Chat；ctx8192 已通过严格 EOS 与 4097-token prompt head-skip
+门禁。ctx10240/ctx16384 在对应 OM 完成 descriptor、数值（`>0.98`）和板端门禁前
+保持 pending，受控开发测试必须显式添加 `--allow-unqualified-profile`。
 
 在 `v0.2.0` 的执行器上，ctx1024 profile 实测 `100.40 ms/token`，即
 `9.96 token/s`，48/48 greedy token 保持一致；ctx4096 为 `7.81 token/s`。

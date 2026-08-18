@@ -30,14 +30,16 @@ Hugging Face checkpoint
 
 ## 当前状态
 
-`v0.2.0` 提供三个 decode 上下文。三档在同一次板端会话中、于 retain-input
-执行器 `cef4edb2…` 上测得，且三档生成的 token 都与各自的已验收基线逐个一致。
+`v0.2.1` 为五档 decode 上下文提供 runtime 合同。长上下文 OM 仍是
+owner-supplied 产物；源码发行不重新分发权重、授权运行库或本地编译模型。
 
 | Profile | 每 token p50 | token/s | prompt 送入 | 状态 |
 |---|---:|---:|---:|---|
 | ctx1024 | 100.40 ms | **9.96** | 79.49 ms/token | 已验收 |
 | ctx4096 | 127.96 ms | **7.81** | 106.28 ms/token | 已验收 |
-| ctx8192 | 165.71 ms | **6.03** | 144.02 ms/token | pending |
+| ctx8192 | 165.71 ms | **6.03** | 146.82 ms/token（4097-token 门） | 已验收 |
+| ctx10240 | 185.78 ms | **5.38** | 166.26 ms/token（4097-token 门） | pending |
+| ctx16384 | 242.51 ms | **4.12** | 222.25 ms/token（4097-token 门） | pending |
 
 三档之间只有 `decode.om` 不同。每一档的 position 0 都在同一个冻结的 `ctx1024`
 `prefill.om` 上引导，并共享同一个 `head_flat.om`，逐字节相同——这就是混合
@@ -52,8 +54,12 @@ prefill 窗口契约。实测三档的 position-0 transformer 时间相差 `0.39
 - `ctx4096`：position 4095 最低公开输出 cosine `0.990820`，板端尾部与模拟器
   逐字节一致，`48/48` 贪心 token，边界 fail-closed。门禁记录见
   `release/contexts/ctx4096.qualification.json`。
-- `ctx8192`：公开输出以 `0.986076` 过门、EOS 门也通过，但标定是 donor 零扩展
-  而非原生，因此保持 `pending`，使用时需要 `--allow-unqualified-profile`。
+- `ctx8192`：最低公开输出 `0.986076`、greedy 48/48、修正后的“句号 + EOS”精确
+  一致，4097-token head-skip、实时内存与 JSONL 门均 PASS。
+- `ctx10240`：长 prompt、EOS 与运行门通过，但 greedy 仅 36/48、尾 hidden
+  cosine `0.978842`，因此保持 pending。
+- `ctx16384`：短 greedy/EOS 与长 prompt 运行门通过，但最佳重标定尾部 hidden/K/V
+  仅 `0.957146/0.985295/0.967172`，因此保持 pending。
 
 三档的 EOS 都能干净停止，48 token oracle 也都通过。若以重新推导的 FP64 参考
 为准，`ctx8192` 与参考逐 token 一致，而 `ctx1024` 与 `ctx4096` 会早停一个
@@ -99,6 +105,7 @@ Thinking 默认关闭，可用 `./app/agent.sh --thinking` 启动，或在运行
 
 | 来源 | 内容 | 原因 |
 |---|---|---|
+| [`v0.2.1`](https://github.com/GitBubble/pico-minicpm5/releases/tag/v0.2.1) | 源码包、SBOM、长上下文 runtime/profile 代码 | 仅源码，不重新分发 OM |
 | [`v0.2.0`](https://github.com/GitBubble/pico-minicpm5/releases/tag/v0.2.0) | 运行时归档、`SHA256SUMS` | 内含 `app/` 板端应用与执行器 `cef4edb2…` |
 | [`v0.1.0`](https://github.com/GitBubble/pico-minicpm5/releases/tag/v0.1.0) | `prefill.om`、`decode.om`、`head_flat.om`、token embedding、tokenizer | 在 `v0.2.0` 中逐字节相同，因此留在原处 |
 | [`v0.1.0-ctx-preview`](https://github.com/GitBubble/pico-minicpm5/releases/tag/v0.1.0-ctx-preview) | `decode.ctx4096.om`、`decode.ctx8192.om` | 只有扩展上下文档位才需要 |

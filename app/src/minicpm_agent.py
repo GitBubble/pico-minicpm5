@@ -18,6 +18,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import threading
 from typing import Callable
 import xml.etree.ElementTree as ET
 
@@ -31,6 +32,12 @@ TOOL_RESPONSE_CLOSE = "</tool_response>"
 # a different bound; every profile must leave room for the schema, call,
 # conversation and final response.
 MAX_TOOL_OUTPUT_CHARS = 800
+
+
+def _decode_text_mode(data: bytes) -> str:
+    """Replicate ``subprocess.run(text=True)``: strict UTF-8 + universal NL."""
+    text = data.decode("utf-8", errors="strict")
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 class ToolProtocolError(ValueError):
@@ -1074,6 +1081,11 @@ class WorkspaceTools:
         self.max_output_chars = max_output_chars
         self._results: dict[str, tuple[str, str, bool]] = {}
         self._result_counter = 0
+        # Optional ``bytes -> None`` sink fed with raw stdout chunks while a
+        # shell tool runs.  ``None`` (the default) keeps the plain
+        # ``subprocess.run`` path; eager tool prefill attaches one for the
+        # duration of a single call.  See ``_run_shell``.
+        self.stdout_listener: Callable[[bytes], None] | None = None
         obj = {"type": "object", "additionalProperties": False}
         self._tools = {
             tool.name: tool for tool in (
@@ -1330,6 +1342,15 @@ class WorkspaceTools:
             return self.result(call.name, True, output)
         except (OSError, ValueError, ToolExecutionError, subprocess.SubprocessError) as error:
             return self.result(call.name, False, str(error))
+
+    def next_ref(self) -> str:
+        """Ref the NEXT successful result will be given.
+
+        Eager tool prefill has to predict the ``ref=rN`` clause of the tool
+        message before the tool has finished, so the counter that ``result``
+        will bump is exposed rather than re-derived.
+        """
+        return f"r{self._result_counter + 1}"
 
     def result(self, name: str, ok: bool, output: str) -> str:
         # Prevent a file or command from closing the surrounding template tag.
@@ -1609,6 +1630,8 @@ class WorkspaceTools:
         if not command:
             raise ToolExecutionError("command is empty")
         timeout = _integer(arguments, "timeout_seconds", 20, 1, 60)
+        if self.stdout_listener is not None:
+            return self._run_shell_streaming(command, timeout)
         completed = subprocess.run(
             command, cwd=self.root, shell=True, text=True,
             capture_output=True, timeout=timeout, check=False)
@@ -1616,3 +1639,65 @@ class WorkspaceTools:
         if completed.stderr:
             combined += ("\n" if combined else "") + completed.stderr
         return f"exit={completed.returncode}\n{combined.strip()}"
+
+    def _run_shell_streaming(self, command: str, timeout: int) -> str:
+        """``_run_shell`` with stdout chunks surfaced while the tool runs.
+
+        Returns the SAME string as the ``subprocess.run`` branch above --
+        including the stderr-after-stdout concatenation, the text-mode
+        newline translation and the final ``.strip()`` -- so a caller can
+        never tell which branch produced a result.  A unit test pins the two
+        against each other over a set of shell cases.
+        """
+        process = subprocess.Popen(
+            command, cwd=self.root, shell=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out_buf, err_buf = bytearray(), bytearray()
+        listener = self.stdout_listener
+
+        def pump(stream, buffer, listen):
+            # Read the RAW fd, never BufferedReader.read(n): the buffered
+            # call blocks until n bytes OR EOF, so a tool emitting less than
+            # n bytes streams NOTHING until it exits.  Board-measured on
+            # SS928 (2026-08-16): a 42-line / 1386 B / 10 s tool delivered
+            # one chunk at t=10.24 s under stream.read(4096) and 42 chunks
+            # starting at t=0.23 s under os.read(fd, 4096).
+            fileno = stream.fileno()
+            while True:
+                try:
+                    chunk = os.read(fileno, 4096)
+                except OSError:
+                    return                      # fd closed/reset under us
+                if not chunk:
+                    return                      # EOF
+                buffer.extend(chunk)
+                if listen is not None:
+                    listen(chunk)
+
+        readers = [
+            threading.Thread(target=pump, daemon=True,
+                             args=(process.stdout, out_buf, listener)),
+            threading.Thread(target=pump, daemon=True,
+                             args=(process.stderr, err_buf, None)),
+        ]
+        for reader in readers:
+            reader.start()
+        try:
+            returncode = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+            for reader in readers:
+                reader.join(timeout=2)
+            raise
+        for reader in readers:
+            reader.join()
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
+        stdout = _decode_text_mode(bytes(out_buf))
+        stderr = _decode_text_mode(bytes(err_buf))
+        combined = stdout
+        if stderr:
+            combined += ("\n" if combined else "") + stderr
+        return f"exit={returncode}\n{combined.strip()}"

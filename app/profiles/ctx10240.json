@@ -1,10 +1,10 @@
 {
   "schema": "pico.minicpm5.runtime-profile.v2",
-  "name": "ctx8192",
-  "status": "qualified",
+  "name": "ctx10240",
+  "status": "pending",
   "context": {
-    "capacity": 8192,
-    "past_length": 8191,
+    "capacity": 10240,
+    "past_length": 10239,
     "prefill_window": 1024
   },
   "capabilities": {
@@ -15,15 +15,15 @@
   "generation": {
     "default_max_new": 128,
     "max_new_limit": 1024,
-    "reserve_tokens": 512,
-    "compact_at_tokens": 6960
+    "reserve_tokens": 640,
+    "compact_at_tokens": 8560
   },
   "agent": {
     "max_tool_steps": 12,
-    "max_tool_output_chars": 4000
+    "max_tool_output_chars": 5000
   },
   "models": {
-    "decode": "models/ctx8192/decode.om",
+    "decode": "models/ctx10240/decode.om",
     "prefill": "models/prefill.om",
     "head": "models/head_flat.om"
   },

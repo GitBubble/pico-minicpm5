@@ -10,7 +10,7 @@ import re
 
 
 SCHEMA = "pico.minicpm5.runtime-profile.v2"
-KNOWN_CONTEXTS = (128, 1024, 4096, 8192)
+KNOWN_CONTEXTS = (128, 1024, 4096, 8192, 10240, 16384)
 _NAME = re.compile(r"[a-z0-9][a-z0-9_-]*")
 
 

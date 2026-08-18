@@ -163,6 +163,8 @@ Profiles are selected at process startup:
 ./app/agent.sh --profile ctx1024
 ./app/agent.sh --profile ctx4096
 ./app/agent.sh --profile ctx8192
+CONTEXT_PROFILE=ctx10240 ./app/agent.sh --allow-unqualified-profile
+CONTEXT_PROFILE=ctx16384 ./app/agent.sh --allow-unqualified-profile
 ```
 
 An explicit path is also valid:
@@ -183,16 +185,18 @@ remains ctx1024.
 | ctx1024 | yes | yes | default local agent |
 | ctx4096 | yes | yes | documents, code and multi-step tasks |
 | ctx8192 | yes | yes | long-context tasks and long sessions |
+| ctx10240 | yes | yes | controlled 10K-context development |
+| ctx16384 | yes | yes | controlled 16K-context development |
 
 Attempting `agent.sh --profile ctx128` fails before model handles are loaded and
 directs the operator to `chat.sh --profile ctx128`.
 
-Qualification state per profile: ctx1024 and ctx4096 are `qualified`
+Qualification state per profile: ctx1024, ctx4096 and ctx8192 are `qualified`
 (ctx4096 under the mixed prefill-window contract, gated by
-`release/contexts/ctx4096.qualification.json`); ctx128 and ctx8192 remain
-`pending`. ctx8192's candidate evidence is checked in at
-`release/contexts/ctx8192.qualification.json` and fails the strict-EOS
-sequence gate, so it still requires `--allow-unqualified-profile`.
+`release/contexts/ctx4096.qualification.json`; ctx8192 under the corrected
+strict-EOS and long-prompt requalification record). ctx128, ctx10240 and
+ctx16384 remain `pending`; the latter two require
+`--allow-unqualified-profile` until their tail numeric and token gates pass.
 
 ### 4.2 Static ABI and memory
 
@@ -209,6 +213,8 @@ packed K or V input occupies:
 | 1024 | 12,570,624 B (~12 MiB) | ~24 MiB |
 | 4096 | 50,319,360 B (~48 MiB) | ~96 MiB |
 | 8192 | 100,651,008 B (~96 MiB) | ~192 MiB |
+| 10240 | 125,816,832 B (~120 MiB) | ~240 MiB |
+| 16384 | 201,314,304 B (~192 MiB) | ~384 MiB |
 
 The loader must fail closed unless the decode attention-mask width and K/V past
 length agree with profile capacity, the prefill handle's mask width and K/V

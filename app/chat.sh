@@ -38,6 +38,9 @@ TOKENIZERS=${TOKENIZERS:-}
 MAX_NEW=${MAX_NEW:-}
 PROFILE=${PICO_PROFILE:-ctx1024}
 REUSE_SESSION_KV=${REUSE_SESSION_KV:-1}
+# Eager tool prefill is DEFAULT OFF. It is an agent-mode feature and the
+# server refuses it without --agent, resident KV and --reuse-session-kv.
+EAGER_TOOL_PREFILL=${EAGER_TOOL_PREFILL:-0}
 
 case "$REUSE_SESSION_KV" in
   1|true|TRUE|on|ON)
@@ -47,6 +50,26 @@ case "$REUSE_SESSION_KV" in
     ;;
   *)
     echo "REUSE_SESSION_KV must be 0/1, false/true or off/on" >&2
+    exit 2
+    ;;
+esac
+
+case "$EAGER_TOOL_PREFILL" in
+  1|true|TRUE|on|ON)
+    EAGER_SET=0
+    for ARG in "$@"; do
+      case "$ARG" in
+        --eager-tool-prefill) EAGER_SET=1 ;;
+      esac
+    done
+    if [ "$EAGER_SET" -eq 0 ]; then
+      set -- --eager-tool-prefill "$@"
+    fi
+    ;;
+  0|false|FALSE|off|OFF|"")
+    ;;
+  *)
+    echo "EAGER_TOOL_PREFILL must be 0/1, false/true or off/on" >&2
     exit 2
     ;;
 esac

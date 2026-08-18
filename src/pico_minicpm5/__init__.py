@@ -3,4 +3,4 @@
 from .contract import OFFICIAL_CONTRACT, MiniCPM5Contract
 
 __all__ = ["MiniCPM5Contract", "OFFICIAL_CONTRACT"]
-__version__ = "0.2.0"
+__version__ = "0.2.1"

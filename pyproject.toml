@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pico-minicpm5"
-version = "0.2.0"
+version = "0.2.1"
 description = "Reproducible MiniCPM5-1B ONNX and Hi3403/PICO three-handle build pipeline"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,8 +25,6 @@ hub = ["huggingface_hub>=0.34"]
 onnx = ["numpy>=1.24", "onnx>=1.16", "safetensors>=0.4"]
 reference = ["numpy>=1.24", "torch>=2.2", "transformers>=4.48", "safetensors>=0.4"]
 dev = ["build>=1.2", "pytest>=8", "ruff>=0.6"]
-# tools/cast_to_gif.py only; not needed to build, test or run the app.
-demo = ["pyte>=0.8", "pillow>=10"]
 
 [project.scripts]
 pico-minicpm5 = "pico_minicpm5.cli:main"

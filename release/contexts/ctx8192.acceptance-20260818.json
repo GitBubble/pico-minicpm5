@@ -1,0 +1,66 @@
+{
+  "schema": "pico.minicpm5.context-acceptance-summary.v1",
+  "date": "2026-08-18",
+  "profile": "ctx8192",
+  "decode": {
+    "bytes": 687129774,
+    "sha256": "1c1c345deddf64e3af3b3c89bee07aba65035620d9e08d69b11b6c9aeb233c3d"
+  },
+  "test_set": {
+    "greedy": "three frozen prompts, 16 generated tokens each",
+    "eos_prompt": "1+1 equals",
+    "eos_expected_ids": [242, 39, 220, 608, 4219, 357, 242, 39, 35, 1],
+    "long_prompt_tokens": 4097,
+    "long_expected_next_id": 12945,
+    "tail_position": 8191,
+    "numeric_threshold_exclusive": 0.98
+  },
+  "results": {
+    "greedy": {"exact": 48, "total": 48, "status": "PASS"},
+    "eos": {
+      "actual_ids": [242, 39, 220, 608, 4219, 357, 242, 39, 35, 1],
+      "finish_reason": "eos",
+      "status": "PASS"
+    },
+    "chinese": {
+      "kind": "nonblocking semantic diagnostic",
+      "semantic_match": true,
+      "strict_token_match": false
+    },
+    "tail_numeric": {
+      "next_hidden": 0.9876303165,
+      "packed_k": 0.9956254988,
+      "packed_v": 0.9860760661,
+      "status": "PASS"
+    },
+    "long_prompt": {
+      "actual_next_id": 12945,
+      "head_calls_skipped": 4096,
+      "head_calls_run": 1,
+      "ingest_seconds": 602.477,
+      "skipped_step_p50_ms": 146.819,
+      "skipped_step_p95_ms": 149.235,
+      "report_sha256": "12d524c1efef80da4fab69d48ece54aef9e95748a4a5d1dd23aa0ae535be4518",
+      "status": "PASS"
+    },
+    "live_memory": {
+      "mmz_used_kib": 2046316,
+      "mmz_remaining_kib": 837268,
+      "linux_mem_available_kib": 765144,
+      "python_vm_hwm_kib": 133780,
+      "status": "PASS"
+    },
+    "jsonl": {
+      "protocol": "pico.minicpm5.runner.v1",
+      "output_ids": [8181],
+      "finish_reason": "length",
+      "status": "PASS"
+    },
+    "context_boundary": {
+      "first_invalid_position": 8192,
+      "rejected_before_model_load": true,
+      "status": "PASS"
+    }
+  },
+  "overall": "PASS"
+}

@@ -687,7 +687,38 @@ def test_merged_accepts_a_legacy_executor_launcher(monkeypatch, tmp_path) -> Non
         context=1024, timeout=1.0, quiet_executor=True)
     session.embed.close()
 
-    assert calls == [{"quiet": True}, {}]
+    assert calls == [{"quiet": True, "extra_executor_args": ()}, {}]
+
+
+@pytest.mark.parametrize(
+    ("context", "workspace_bytes"),
+    ((8192, 206_127_104), (10240, 257_638_400),
+     (16384, 412_188_672)),
+)
+def test_workspace_retention_contract_is_exact(
+        context: int, workspace_bytes: int) -> None:
+    server = _server_module()
+    session = server.Merged.__new__(server.Merged)
+    session.context = context
+    session.decode_index = 0
+    session.retain_decode_workspace = True
+    cache_bytes = server.CHANNELS * (context - 1) * server.HEAD_DIM * 2
+    session.descriptors = [(
+        (server.HIDDEN * 16, context * 4,
+         server.HEAD_DIM * server.HEAD_DIM * 4,
+         cache_bytes, cache_bytes, 352, workspace_bytes),
+        (24576, 24576, 24576),
+    )]
+
+    session._validate_workspace_retention_contract()
+    assert server._workspace_retention_executor_args(context) == (
+        "--no-cache-model", "0", "--retain-input",
+        f"0:6:5:{workspace_bytes}")
+
+    inputs, outputs = session.descriptors[0]
+    session.descriptors[0] = (inputs[:-1], outputs)
+    with pytest.raises(RuntimeError, match="exactly 7"):
+        session._validate_workspace_retention_contract()
 
 
 def test_merged_overlaps_tokenizer_after_executor_spawn(
@@ -1428,6 +1459,48 @@ def test_cli_plumbs_mixed_prefill_window_profile(
     assert started[0]["prefill_context"] == 1024
     assert started[0]["prefill"] == tmp_path / "models/prefill.om"
     assert started[0]["decode"] == tmp_path / "models/ctx4096/decode.om"
+    assert started[0]["retain_decode_workspace"] is False
+
+
+def test_cli_enables_retention_for_extended_release_profiles(
+        monkeypatch, tmp_path: Path) -> None:
+    server = _server_module()
+    started = []
+
+    class Registry:
+        enabled_widths = (1,)
+
+        def to_dict(self):
+            return {"schema": "fake.runtime", "enabled_widths": [1]}
+
+    class Session:
+        models = [object(), object(), object()]
+        kv_slots = {0: (0, 1), 1: (0, 1)}
+        last_phase_steps = []
+
+        def __init__(self, **kwargs):
+            started.append(kwargs)
+
+        def generate(self, *_args, **_kwargs):
+            return "max", [7], [1.0]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        server.prefill_runtime_contract,
+        "load_runtime_registry", lambda **_kwargs: Registry())
+    monkeypatch.setattr(server, "Merged", Session)
+    monkeypatch.setattr(sys, "argv", [
+        "merged_board_server.py", "--persistent-executor", "executor",
+        "--profile", "ctx10240", "--allow-unqualified-profile",
+        "--deployment-root", str(tmp_path), "--embedding", "embedding.bin",
+        "--prompt-ids", "11",
+    ])
+
+    assert server.main() == 0
+    assert started[0]["context"] == 10240
+    assert started[0]["retain_decode_workspace"] is True
 
 
 def test_cli_rejects_host_kv_under_mixed_profile(
@@ -1603,6 +1676,13 @@ def test_chat_and_agent_launchers_are_separate(tmp_path: Path) -> None:
         ["sh", str(script)], env=ctx128, text=True,
         capture_output=True, check=True).stdout.splitlines()
     assert chat128[chat128.index("--profile") + 1] == "ctx128"
+
+    ctx16k = environment.copy()
+    ctx16k["CONTEXT_PROFILE"] = "ctx16384"
+    agent16k = subprocess.run(
+        ["sh", str(PROJECT / "app" / "agent.sh")], env=ctx16k,
+        text=True, capture_output=True, check=True).stdout.splitlines()
+    assert agent16k[agent16k.index("--profile") + 1] == "ctx16384"
 
     no_reuse = environment.copy()
     no_reuse["REUSE_SESSION_KV"] = "0"

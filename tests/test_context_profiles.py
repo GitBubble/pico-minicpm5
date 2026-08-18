@@ -30,8 +30,8 @@ def test_checked_in_context_records_validate_and_split_verdicts() -> None:
 
     assert ctx4096["passes"] is True
     assert ctx4096["minimum_public_output"] == 0.9908199813
-    assert ctx8192["passes"] is False
-    assert ctx8192["overall"] == "CANDIDATE_CALIBRATION_NOT_NATIVE"
+    assert ctx8192["passes"] is True
+    assert ctx8192["overall"] == "PASS"
     assert ctx8192["minimum_public_output"] == 0.9860760661
 
 
@@ -82,7 +82,7 @@ def test_validator_rejects_low_threshold_and_boundary_equality() -> None:
 def test_validator_rejects_verdict_and_portability_holes() -> None:
     record = _record("ctx8192")
     fake_pass = copy.deepcopy(record)
-    fake_pass["verdict"]["overall"] = "PASS"
+    fake_pass["verdict"]["eos"] = "FAIL"
     with pytest.raises(context_profiles.ContextQualificationError,
                        match="every gate PASS"):
         context_profiles.validate_record(fake_pass)
@@ -120,5 +120,5 @@ def test_cli_verifies_context_records(capsys) -> None:
     assert json.loads(capsys.readouterr().out)["passes"] is True
     assert cli.main([
         "qualify-context-profile", "--record",
-        str(CONTEXTS / "ctx8192.qualification.json")]) == 1
-    assert json.loads(capsys.readouterr().out)["passes"] is False
+        str(CONTEXTS / "ctx8192.qualification.json")]) == 0
+    assert json.loads(capsys.readouterr().out)["passes"] is True

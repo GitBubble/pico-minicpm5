@@ -8,5 +8,10 @@ MiniCPM5-1B is developed by OpenBMB and is obtained separately from
 https://huggingface.co/openbmb/MiniCPM5-1B. No model weights are included in
 the source distribution.
 
-ATC, DDK, libinstsim, board runtime libraries and custom-op shared objects are
-external user-supplied components and are not distributed by this project.
+ATC, DDK, libinstsim and `libsvp_custom.so` are external user-supplied
+components and are not distributed by this project.
+
+The four AArch64 objects in `app/lib/` (`libsvp_acl.so`, `libsvp_aicpu.so`,
+`libprotobuf-c.so.1`, `libsecurec.so`) are the SS928V100_SDK_V2.0.2.2 SVP ACL
+runtime required by the board executor. They ship with the board application
+so a factory Euler Pi image can load OMs without a second SDK checkout.

@@ -147,10 +147,131 @@ tar cf - . | ssh root@BOARD_IP \
   'mkdir -p /opt/pico-minicpm5 && tar xf - -C /opt/pico-minicpm5'
 ```
 
-板端运行库默认位于 `/root/pico_default_smoke/lib`，这些 SDK 动态库不会在开源
-项目中重新分发。runtime 包在 `app/bin/` 提供 AArch64 executor 二进制，
-并将其 C 源码和 Makefile 统一归档在 `app/native/`。这些文件不再作为
-独立 Release Asset 重复发布。
+## Euler Pi 出厂镜像：先卸 pqp，再加载 SVP NPU
+
+已验收的板端数字来自 Hi3403 / SS928。易百纳 **Euler Pi 2.0** 出厂 Linux
+（`load_ss928v100 -i`，由 `/etc/init.d/S90autorun` 调用）会插入 `ot_pqp.ko`。
+该模块与 `ot_svp_npu.ko` **不能同时存在**——厂方脚本里写明了这一点——因此
+`/dev/svp_npu` 不会出现，三句柄 OM 也无法执行。
+
+这块板登录后应看到的环境（来自 `/etc/firmware_version`）：
+
+| 字段 | 值 |
+|---|---|
+| 产品 | Euler Pi |
+| Chip | SS928V100 |
+| SDK | SS928V100_SDK_V2.0.2.2 |
+| Hardware | HiEuerPI_V1.2 |
+| Software | V2.0 |
+| Kernel | 4.19.90 aarch64 |
+| 出厂账号 | `root` / `ebaina`（手册《海鸥派快速体验手册》） |
+| USB 直连 | 主机 `192.168.137.1/24`，板端可加 `192.168.137.100/24` |
+
+换一块新出厂板时，主机上一条命令即可（USB 网卡已是 `192.168.137.1`，
+部署树已装配好）：
+
+```bash
+./app/bringup_euler_pi.sh \
+  --stage /tmp/pico-minicpm5-board-stage \
+  --iface en8 --board-ip 192.168.137.100 --smoke
+```
+
+它会发现链路上的板、用 `root` / `ebaina` 登录、加上 `192.168.137.100`、
+拷入部署（含 `app/lib`）、卸 pqp / 加载 NPU、必要时装 Python，再跑
+`chat.sh` 冒烟。
+
+拷贝完成后也可以只在板端跑安装脚本：卸 `pqp`、加载 NPU、把该步骤挂到开机
+（排在 `S90autorun` 之后），并在交互式 SSH 登录时打印上述环境：
+
+```bash
+ssh root@BOARD_IP \
+  '/opt/pico-minicpm5/app/install_board.sh --usb-ipv4 192.168.137.100/24'
+```
+
+只做当次模块切换、不改开机与登录提示：
+
+```bash
+ssh root@BOARD_IP /opt/pico-minicpm5/app/prepare_npu.sh
+ssh root@BOARD_IP /opt/pico-minicpm5/app/board_env.sh
+```
+
+`chat.sh` / `agent.sh` 在 `/dev/svp_npu` 缺失且厂方 `svp_npu` ko 目录存在时
+会再调用一次 `prepare_npu.sh`。重启后仍依赖 `install_board.sh` 写入的
+`/etc/init.d/S91pico_npu`，否则 `S90autorun` 会再次装上 `ot_pqp`。
+
+## Euler Pi 出厂镜像：在主机上装 Python 3
+
+出厂 Linux **没有** `python3`、没有 `pip`、也没有 `opkg`/`apt`。glibc 是
+`2.29`，不能把 Ubuntu 的 3.10 deb 直接拷上去。`chat.sh` 需要 CPython 3.10
+和 `tokenizers`（词表）；OpenClaw 预览再加 `jinja2`。
+
+在**主机**上跑，不要在板端跑：
+
+```bash
+# 部署包已经在 /opt/pico-minicpm5 之后
+./app/install_python.sh --board root@192.168.137.100
+```
+
+脚本会下载钉死的
+`cpython-3.10.21+20260814` aarch64 `install_only_stripped`（glibc ≥ 2.17）
+以及 `tokenizers` / `jinja2` / `MarkupSafe` 的 manylinux aarch64 轮子，校验
+SHA-256，解到 `/opt/pico-minicpm5/venv`。`chat.sh` 会优先用
+`$ROOT/venv/bin/python`。
+
+GitHub / PyPI 慢时（常见于国内网络）：
+
+```bash
+PICO_GITHUB_MIRROR=https://ghfast.top \
+PICO_PYPI_INDEX=https://pypi.tuna.tsinghua.edu.cn \
+  ./app/install_python.sh --board root@192.168.137.100
+```
+
+只在主机上预下载、稍后自己拷：
+
+```bash
+./app/install_python.sh --stage /tmp/pico-board-python --skip-upload
+tar cf - -C /tmp/pico-board-python venv \
+  | ssh root@192.168.137.100 'tar xf - -C /opt/pico-minicpm5'
+```
+
+板端自检：
+
+```bash
+ssh root@192.168.137.100 \
+  '/opt/pico-minicpm5/venv/bin/python -c "import tokenizers,jinja2; print(tokenizers.__version__)"'
+```
+
+不要在板端 `apt install python3`：这套 rootfs 不是 Debian。不要用要求
+glibc 2.34+ 的 `manylinux_2_34` 轮子。
+
+## Euler Pi 出厂镜像：随包交付的 SVP ACL 运行库
+
+`chat.sh` 拉起的执行器链接的是 `libsvp_acl.so`，不是厂方 `/opt/lib/npu` 里的
+`libascendcl.so`。这四只库已经放在部署包的 `app/lib/`，来源是
+`SS928V100_SDK_V2.0.2.2`。把整个目录拷到板上即可，不必再去翻 SDK：
+
+| 文件 | 作用 |
+|---|---|
+| `app/lib/libsvp_acl.so` | SVP ACL |
+| `app/lib/libsvp_aicpu.so` | AICPU |
+| `app/lib/libprotobuf-c.so.1` | protobuf-c |
+| `app/lib/libsecurec.so` | 边界检查 |
+
+`chat.sh` 优先使用 `$APP/lib`。校验：
+
+```bash
+ssh root@192.168.137.100 \
+  'cd /opt/pico-minicpm5/app/lib && sha256sum -c SHA256SUMS'
+```
+
+只有在你要换成另一棵 SDK 树时才需要：
+
+```bash
+./app/install_runtime_lib.sh --sdk-root /path/to/SS928V100_SDK_V2.0.2.2
+```
+
+runtime 包在 `app/bin/` 提供 AArch64 executor，源码与 Makefile 在
+`app/native/`。`app/lib/` 是板端加载 OM 所需的运行库，不是 ATC/DDK。
 
 ## 直接使用与 OpenClaw 预览
 
@@ -186,10 +307,10 @@ pico-minicpm5 onnx export-head --model-dir work/model --out work/onnx/head/model
 
 ## 发布边界
 
-源码仓库包含 Python 包、配置、schema、测试和文档。模型权重、ONNX external
-data、OM、token embedding、ATC/DDK/libinstsim、SDK 动态库和私有板端信息不会
-进入源码归档。预编译的模型派生产物通过独立 Release asset 发布，并记录来源、
-大小与 SHA-256。
+源码仓库包含 Python 包、配置、schema、测试、文档，以及板端执行器所需的
+`app/lib/` SVP ACL 运行库。模型权重、ONNX external data、OM、token embedding、
+ATC/DDK/libinstsim、`libsvp_custom.so` 和私有板端信息不会进入源码归档。预编译
+的模型派生产物通过独立 Release asset 发布，并记录来源、大小与 SHA-256。
 
 更多中文文档：
 
@@ -202,6 +323,7 @@ data、OM、token embedding、ATC/DDK/libinstsim、SDK 动态库和私有板端�
 - [SDK 环境](docs/SDK_SETUP.zh-CN.md)
 - [发布策略](docs/RELEASE.zh-CN.md)
 - [Hi3403 验收](docs/Hi3403_ACCEPTANCE.zh-CN.md)
+- Euler Pi 出厂镜像：见上文「Euler Pi 出厂镜像：先卸 pqp，再加载 SVP NPU」
 
 开发检查：
 

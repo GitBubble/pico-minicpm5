@@ -2,8 +2,9 @@
 
 [中文](SDK_SETUP.zh-CN.md)
 
-This project does not distribute ATC, DDK, libinstsim, board libraries,
-container images or `libsvp_custom.so`.
+This project does not distribute ATC, DDK, libinstsim, container images or
+`libsvp_custom.so`. The four SVP ACL objects the board executor links ship in
+`app/lib/` (see `app/lib/README.md`).
 
 The production compiler invocation needs:
 

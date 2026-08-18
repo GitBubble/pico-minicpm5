@@ -10,6 +10,7 @@
 | Transformers / PyTorch | Float reference capture | Optional Python dependencies; no package bytes vendored |
 | Vendor ATC/DDK/libinstsim | PICO compilation and local simulation | User-supplied; never included in public source or CI artifacts |
 | `libsvp_custom.so` | `ExtendRMSNorm` compile/runtime registration | User-built or user-supplied; never included in this repository |
+| `app/lib/libsvp_acl.so` and siblings | Board executor runtime | Shipped from `SS928V100_SDK_V2.0.2.2`; see `app/lib/README.md` |
 
 Generated OM and embedding artifacts contain or derive from model parameters.
 Release manifests therefore record them as `derived-model` artifacts even

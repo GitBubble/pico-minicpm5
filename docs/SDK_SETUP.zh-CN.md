@@ -2,8 +2,9 @@
 
 [English](SDK_SETUP.md)
 
-本项目不分发 ATC、DDK、libinstsim、板端动态库、容器镜像或
-`libsvp_custom.so`。生产编译需要：支持 framework 5 / V101 / image-list / online
+本项目不分发 ATC、DDK、libinstsim、容器镜像或 `libsvp_custom.so`。
+板端执行器链接的四只 SVP ACL 库随 `app/lib/` 交付（见
+`app/lib/README.zh-CN.md`）。生产编译需要：支持 framework 5 / V101 / image-list / online
 OM / custom-op 的 ATC、匹配的 runtime/linker 库、注册 `ExtendRMSNorm` 的
 custom-op 库，以及合法可用的 Hi3403 运行环境。
 

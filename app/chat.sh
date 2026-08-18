@@ -5,12 +5,27 @@ set -eu
 
 APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT=${PICO_MINICPM5_ROOT:-$(dirname "$APP_DIR")}
+# Standalone CPython ships its own terminfo. Factory Euler Pi has none, and
+# GNU readline SIGSEGVs on the first input() of the interactive REPL.
+if [ -z "${TERMINFO:-}" ] && [ -d "$ROOT/venv/share/terminfo" ]; then
+  TERMINFO=$ROOT/venv/share/terminfo
+  export TERMINFO
+fi
+# Euler Pi factory Linux inserts ot_pqp.ko, which blocks /dev/svp_npu.
+# Host-side tests skip this: /opt/ko/svp_npu is only on the board image.
+if [ ! -e /dev/svp_npu ] && [ -x "$APP_DIR/prepare_npu.sh" ] && [ -d /opt/ko/svp_npu ]; then
+  "$APP_DIR/prepare_npu.sh"
+fi
 if [ -n "${PICO_RUNTIME_LIB:-}" ]; then
   LIB=$PICO_RUNTIME_LIB
-elif [ -d /root/pico_default_smoke/lib ]; then
+elif [ -e "$APP_DIR/lib/libsvp_acl.so" ]; then
+  LIB=$APP_DIR/lib
+elif [ -e /root/pico_default_smoke/lib/libsvp_acl.so ]; then
   LIB=/root/pico_default_smoke/lib
-else
+elif [ -e /opt/ss928-runtime/lib/libsvp_acl.so ]; then
   LIB=/opt/ss928-runtime/lib
+else
+  LIB=$APP_DIR/lib
 fi
 if [ -n "${PYTHON:-}" ]; then
   PYTHON_BIN=$PYTHON

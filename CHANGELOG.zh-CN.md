@@ -2,6 +2,20 @@
 
 [English](CHANGELOG.md)
 
+## Unreleased
+
+- 板端新增 `app/prepare_npu.sh`、`app/board_env.sh`、`app/install_board.sh`：
+  Euler Pi 出厂镜像会装 `ot_pqp.ko`，与 `ot_svp_npu` 互斥；安装脚本卸 pqp、
+  加载 NPU、写入 `S91pico_npu`，并在 SSH 登录时打印 Chip / SDK / Hardware。
+- 项目 README 增加「Euler Pi 出厂镜像」一节。
+- 主机脚本 `app/install_python.sh`：出厂镜像没有 python3，从主机下载钉死的
+  CPython 3.10.21 aarch64 + tokenizers/jinja2 轮子，装到板端
+  `/opt/pico-minicpm5/venv`。
+- 主机脚本 `app/install_runtime_lib.sh`：从授权 SDK 拷贝 `libsvp_acl.so` 等到
+  `/root/pico_default_smoke/lib`。厂方 `/opt/lib/npu` 是 Ascend 栈，执行器用不了。
+- 四只板端 SVP ACL 库作为交付件放入 `app/lib/`。`chat.sh` 优先用它们，用户不必
+  再翻 SDK。
+
 ## 0.2.0 - 2026-08-17
 
 ### 执行器可复现，且每一档都变快了

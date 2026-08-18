@@ -21,6 +21,12 @@ Python package is needed.
 ├── app/
 │   ├── chat.sh
 │   ├── agent.sh
+│   ├── prepare_npu.sh
+│   ├── board_env.sh
+│   ├── install_board.sh
+│   ├── install_python.sh
+│   ├── install_runtime_lib.sh
+│   ├── lib/{libsvp_acl.so,libsvp_aicpu.so,libprotobuf-c.so.1,libsecurec.so}
 │   ├── bin/pico_persistent_acl_executor.aarch64
 │   ├── native/{Makefile,pico_persistent_acl_executor.c}
 │   ├── profiles/{ctx128,ctx1024,ctx4096,ctx8192}.json
@@ -35,15 +41,22 @@ Python package is needed.
 └── assets/{token_embedding.f16.bin,tokenizer.json}
 ```
 
-The licensed Hi3403 runtime libraries are expected in
-`/root/pico_default_smoke/lib`. They are supplied by the board SDK and are not
-part of this repository.
+The executor runtime ships in `app/lib/` (`libsvp_acl.so` and siblings; see
+`lib/README.md`). `chat.sh` prefers that directory. Factory `/opt/lib/npu` is
+the Ascend stack and cannot replace it.
+
+Euler Pi factory Linux inserts `ot_pqp.ko`, which blocks `/dev/svp_npu`, and
+it has no `python3`. Run `./app/install_board.sh` on first deploy, then from
+the **host** run `./app/install_python.sh --board root@BOARD` (see both
+"Euler Pi factory image" chapters in the project README). Interactive SSH
+login then prints Chip / SDK / Hardware / Software.
 
 ## Run on the board
 
 ```bash
 cd /opt/pico-minicpm5
-chmod +x app/chat.sh app/agent.sh app/bin/pico_persistent_acl_executor.aarch64
+chmod +x app/*.sh app/bin/pico_persistent_acl_executor.aarch64
+./app/install_board.sh --usb-ipv4 192.168.137.100/24
 
 # Official MiniCPM5 chat template, without tools.
 ./app/chat.sh
@@ -255,8 +268,9 @@ recognize these environment overrides:
 | `PICO_MINICPM5_COLOR` | `auto` | `auto`, `always` or `never` |
 | `NO_COLOR` | unset | Disable ANSI colour while in auto mode |
 
-Runtime libraries are detected first at `/root/pico_default_smoke/lib`, then
-at `/opt/ss928-runtime/lib`. Python is detected first at
+Runtime libraries are detected first at `app/lib`, then
+`/root/pico_default_smoke/lib`, then `/opt/ss928-runtime/lib` (must contain
+`libsvp_acl.so`). Python is detected first at
 `$PICO_MINICPM5_ROOT/venv/bin/python`, then as `python3`.
 
 ## Quick checks
@@ -264,8 +278,8 @@ at `/opt/ss928-runtime/lib`. Python is detected first at
 ```bash
 cd /opt/pico-minicpm5
 sha256sum -c SHA256SUMS
-test -r "${PICO_RUNTIME_LIB:-/opt/ss928-runtime/lib}/libsvp_acl.so" || \
-  ls "${PICO_RUNTIME_LIB:-/opt/ss928-runtime/lib}"
+test -r "${PICO_RUNTIME_LIB:-app/lib}/libsvp_acl.so" || \
+  ls "${PICO_RUNTIME_LIB:-app/lib}"
 python3 -c 'import tokenizers; print(tokenizers.__version__)'
 ```
 

@@ -140,21 +140,142 @@ Copy the assembled directory to the board and start the demo:
 ```bash
 tar cf - . | ssh root@BOARD_IP \
   'mkdir -p /opt/pico-minicpm5 && tar xf - -C /opt/pico-minicpm5'
-
-ssh root@BOARD_IP \
-  '/opt/pico-minicpm5/app/chat.sh'
 ```
+
+## Euler Pi factory image: unload pqp, then load SVP NPU
+
+The qualified board numbers are Hi3403 / SS928. The Ebaina **Euler Pi 2.0**
+factory Linux image runs `load_ss928v100 -i` from `/etc/init.d/S90autorun` and
+inserts `ot_pqp.ko`. That module is mutually exclusive with `ot_svp_npu.ko` —
+the vendor script says so — so `/dev/svp_npu` never appears and the three
+handles cannot execute.
+
+On this board an interactive SSH login should report:
+
+| Field | Value |
+|---|---|
+| Product | Euler Pi |
+| Chip | SS928V100 |
+| SDK | SS928V100_SDK_V2.0.2.2 |
+| Hardware | HiEuerPI_V1.2 |
+| Software | V2.0 |
+| Kernel | 4.19.90 aarch64 |
+| Factory login | `root` / `ebaina` (Euler Pi quick-start manual) |
+| USB link | host `192.168.137.1/24`, board may add `192.168.137.100/24` |
+
+On a fresh factory board, one host command is enough (USB NIC already
+`192.168.137.1`, stage tree assembled):
 
 ```bash
-ssh root@BOARD_IP '/opt/pico-minicpm5/app/chat.sh --profile ctx4096'
+./app/bringup_euler_pi.sh \
+  --stage /tmp/pico-minicpm5-board-stage \
+  --iface en8 --board-ip 192.168.137.100 --smoke
 ```
 
-The accepted board image provides the licensed runtime libraries under
-`/root/pico_default_smoke/lib`; they are intentionally not redistributed in
-this repository or release. Override `TOKENIZERS` if the board's `tokenizers`
-Python package is installed outside the normal Python environment. The runtime
-archive keeps the compiled executor in `app/bin/` and its rebuildable source
-and Makefile in `app/native/`.
+It finds the peer, logs in as `root` / `ebaina`, adds `192.168.137.100`,
+copies the tree (including `app/lib`), unloads pqp / loads the NPU, installs
+Python if needed, and smokes `chat.sh`.
+
+After the copy, you can also run the installer once. It unloads `pqp`, loads the NPU,
+persists that swap after `S90autorun`, and prints the environment on the next
+interactive SSH login:
+
+```bash
+ssh root@BOARD_IP \
+  '/opt/pico-minicpm5/app/install_board.sh --usb-ipv4 192.168.137.100/24'
+```
+
+Module swap only, no boot hook or login banner:
+
+```bash
+ssh root@BOARD_IP /opt/pico-minicpm5/app/prepare_npu.sh
+ssh root@BOARD_IP /opt/pico-minicpm5/app/board_env.sh
+```
+
+`chat.sh` / `agent.sh` call `prepare_npu.sh` again if `/dev/svp_npu` is missing
+and the vendor `svp_npu` ko directory exists. A reboot still needs the
+`/etc/init.d/S91pico_npu` hook written by `install_board.sh`, or `S90autorun`
+will reload `ot_pqp`.
+
+## Euler Pi factory image: install Python 3 from the host
+
+Factory Linux has **no** `python3`, no `pip`, and no `opkg`/`apt`. glibc is
+`2.29`, so an Ubuntu 3.10 `.deb` will not drop in. `chat.sh` needs CPython
+3.10 plus `tokenizers`; the OpenClaw preview also needs `jinja2`.
+
+Run this on the **host**, not on the board:
+
+```bash
+# after the deployment tree is already on /opt/pico-minicpm5
+./app/install_python.sh --board root@192.168.137.100
+```
+
+It downloads pinned `cpython-3.10.21+20260814` aarch64
+`install_only_stripped` (glibc ≥ 2.17) and manylinux aarch64 wheels for
+`tokenizers` / `jinja2` / `MarkupSafe`, checks SHA-256, and unpacks to
+`/opt/pico-minicpm5/venv`. `chat.sh` prefers `$ROOT/venv/bin/python`.
+
+If GitHub or PyPI is slow:
+
+```bash
+PICO_GITHUB_MIRROR=https://ghfast.top \
+PICO_PYPI_INDEX=https://pypi.tuna.tsinghua.edu.cn \
+  ./app/install_python.sh --board root@192.168.137.100
+```
+
+Stage only, then copy yourself:
+
+```bash
+./app/install_python.sh --stage /tmp/pico-board-python --skip-upload
+tar cf - -C /tmp/pico-board-python venv \
+  | ssh root@192.168.137.100 'tar xf - -C /opt/pico-minicpm5'
+```
+
+Check on the board:
+
+```bash
+ssh root@192.168.137.100 \
+  '/opt/pico-minicpm5/venv/bin/python -c "import tokenizers,jinja2; print(tokenizers.__version__)"'
+```
+
+Do not `apt install python3` on this rootfs. Do not use `manylinux_2_34`
+wheels that need glibc 2.34+.
+
+## Euler Pi factory image: SVP ACL runtime ships in the app
+
+The executor linked by `chat.sh` needs `libsvp_acl.so`, not factory
+`/opt/lib/npu/libascendcl.so`. The four objects live in `app/lib/`, taken
+from `SS928V100_SDK_V2.0.2.2`. Copy the deployment tree onto the board; do
+not hunt the SDK again:
+
+| File | Role |
+|---|---|
+| `app/lib/libsvp_acl.so` | SVP ACL |
+| `app/lib/libsvp_aicpu.so` | AICPU |
+| `app/lib/libprotobuf-c.so.1` | protobuf-c |
+| `app/lib/libsecurec.so` | bounds-checked C |
+
+`chat.sh` prefers `$APP/lib`. Check:
+
+```bash
+ssh root@192.168.137.100 \
+  'cd /opt/pico-minicpm5/app/lib && sha256sum -c SHA256SUMS'
+```
+
+Only if you must refresh from another SDK tree:
+
+```bash
+./app/install_runtime_lib.sh --sdk-root /path/to/SS928V100_SDK_V2.0.2.2
+```
+
+The runtime archive keeps the executor in `app/bin/` and its source in
+`app/native/`. `app/lib/` is the board OM runtime, not ATC/DDK. Override
+`TOKENIZERS` if the board's `tokenizers` package lives outside the venv.
+
+```bash
+ssh root@BOARD_IP '/opt/pico-minicpm5/app/chat.sh'
+ssh root@BOARD_IP '/opt/pico-minicpm5/app/chat.sh --profile ctx4096'
+```
 
 If the release files are already present on the board, skip all host-side
 steps and follow [`app/README.md`](app/README.md). The shortest board command
@@ -352,8 +473,8 @@ documentation. It does not contain:
 
 - checkpoint weights or weight-derived ONNX external-data files;
 - OM binaries, token embeddings or copied tokenizer assets;
-- ATC/DDK/libinstsim, Docker images, custom-op shared objects or board runtime
-  libraries;
+- ATC/DDK/libinstsim, Docker images or `libsvp_custom.so`;
+  (`app/lib/` ships the four SVP ACL objects the board executor links)
 - owner-controlled golden models, mapper dumps, calibration image lists,
   board addresses, credentials or raw logs.
 
@@ -370,7 +491,8 @@ defines hybrid routing and the ctx128/1024/4096/8192 capability matrix; the
 `S128 -> S32 -> S16 -> S1` TTFT path and its activation gates. The
 [quantization contract](docs/QUANTIZATION_CONTRACT.md) records how ATC's IFMR
 search and the in-graph `Clip` bounds combine (`min(inferred, clip)`), and why
-position zero needs its own calibration family.
+position zero needs its own calibration family. Euler Pi factory Linux needs
+the NPU swap in "Euler Pi factory image" above before `/dev/svp_npu` exists.
 
 ## Development
 

@@ -2,6 +2,22 @@
 
 [中文](CHANGELOG.zh-CN.md)
 
+## Unreleased
+
+- Board scripts `app/prepare_npu.sh`, `app/board_env.sh`, `app/install_board.sh`:
+  Euler Pi factory Linux inserts `ot_pqp.ko`, which is mutually exclusive with
+  `ot_svp_npu`. The installer unloads pqp, loads the NPU, writes `S91pico_npu`,
+  and prints Chip / SDK / Hardware on SSH login.
+- Project README adds an "Euler Pi factory image" section.
+- Host script `app/install_python.sh`: factory Linux has no python3. It
+  downloads pinned CPython 3.10.21 aarch64 plus tokenizers/jinja2 wheels into
+  `/opt/pico-minicpm5/venv` on the board.
+- Host script `app/install_runtime_lib.sh`: copy `libsvp_acl.so` and siblings
+  from the licensed SDK into `/root/pico_default_smoke/lib`. Factory
+  `/opt/lib/npu` is the Ascend stack and will not load the executor.
+- The four board SVP ACL objects now ship in `app/lib/`. `chat.sh` prefers
+  them, so users do not have to hunt the SDK.
+
 ## 0.2.0 - 2026-08-17
 
 ### The executor is reproducible, and every context got faster

@@ -20,6 +20,12 @@ README。直接运行不需要重新导出 ONNX、不需要
 ├── app/
 │   ├── chat.sh
 │   ├── agent.sh
+│   ├── prepare_npu.sh
+│   ├── board_env.sh
+│   ├── install_board.sh
+│   ├── install_python.sh
+│   ├── install_runtime_lib.sh
+│   ├── lib/{libsvp_acl.so,libsvp_aicpu.so,libprotobuf-c.so.1,libsecurec.so}
 │   ├── bin/pico_persistent_acl_executor.aarch64
 │   ├── native/{Makefile,pico_persistent_acl_executor.c}
 │   ├── profiles/{ctx128,ctx1024,ctx4096,ctx8192}.json
@@ -34,14 +40,21 @@ README。直接运行不需要重新导出 ONNX、不需要
 └── assets/{token_embedding.f16.bin,tokenizer.json}
 ```
 
-有授权的 Hi3403 运行库默认位于 `/root/pico_default_smoke/lib`。它们由板端
-SDK 环境提供，开源仓库和 Release 不会重新分发这些动态库。
+执行器运行库随包放在 `app/lib/`（`libsvp_acl.so` 等，见 `lib/README.zh-CN.md`）。
+`chat.sh` 优先用这个目录。厂方 `/opt/lib/npu` 是另一套 Ascend 库，不能替代。
+
+Euler Pi 出厂 Linux 会装上 `ot_pqp.ko`，挡住 `/dev/svp_npu`，而且没有
+`python3`。第一次部署请先跑 `./app/install_board.sh`，再在**主机**上跑
+`./app/install_python.sh --board root@BOARD`（详见项目 README 的
+「Euler Pi 出厂镜像」两节）。交互式 SSH 登录会打印 Chip / SDK / Hardware /
+Software。
 
 ## 直接运行
 
 ```bash
 cd /opt/pico-minicpm5
-chmod +x app/chat.sh app/agent.sh app/bin/pico_persistent_acl_executor.aarch64
+chmod +x app/*.sh app/bin/pico_persistent_acl_executor.aarch64
+./app/install_board.sh --usb-ipv4 192.168.137.100/24
 
 # MiniCPM5 官方无工具 chat template
 ./app/chat.sh
@@ -227,7 +240,8 @@ readline 处理 UTF-8 编辑，彩色 prompt 的转义序列标记为零宽，�
 | `PICO_MINICPM5_COLOR` | `auto` | `auto`、`always` 或 `never` |
 | `NO_COLOR` | 未设置 | 设置后在 auto 模式关闭 ANSI 颜色 |
 
-运行库依次探测 `/root/pico_default_smoke/lib` 和 `/opt/ss928-runtime/lib`；
+运行库依次探测 `app/lib`、`/root/pico_default_smoke/lib` 和
+`/opt/ss928-runtime/lib`（须含 `libsvp_acl.so`）；
 Python 依次探测 `$PICO_MINICPM5_ROOT/venv/bin/python` 和 `python3`。
 
 ## 快速排障
@@ -235,8 +249,8 @@ Python 依次探测 `$PICO_MINICPM5_ROOT/venv/bin/python` 和 `python3`。
 ```bash
 cd /opt/pico-minicpm5
 sha256sum -c SHA256SUMS
-test -r "${PICO_RUNTIME_LIB:-/opt/ss928-runtime/lib}/libsvp_acl.so" || \
-  ls "${PICO_RUNTIME_LIB:-/opt/ss928-runtime/lib}"
+test -r "${PICO_RUNTIME_LIB:-app/lib}/libsvp_acl.so" || \
+  ls "${PICO_RUNTIME_LIB:-app/lib}"
 python3 -c 'import tokenizers; print(tokenizers.__version__)'
 ```
 

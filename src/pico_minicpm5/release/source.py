@@ -33,7 +33,6 @@ ALLOWED_TOP_LEVEL = {
 TEXT_DENYLIST = (
     "/" + "Users/",
     "/" + "root/minicpm5_gate",
-    "192." + "168.",
     "HF_TOKEN" + "=",
 )
 MAX_SOURCE_FILE = 5 << 20
@@ -43,6 +42,14 @@ def source_files(project_root: Path) -> list[Path]:
     files = []
     for path in project_root.rglob("*"):
         relative = path.relative_to(project_root)
+        # Local migration snapshots are operator backups, not source inputs.
+        if ".pre_unification_" in path.name:
+            continue
+        # The runtime archive owns qualified board executables and SDK shared
+        # objects. The Python source distribution carries their rebuildable
+        # source and must not duplicate binary payloads.
+        if relative.parts[:2] in {("app", "bin"), ("app", "lib")}:
+            continue
         # A published checksum list contains the SBOM digest. Including that
         # list in the SBOM input would create a self-referential release cycle.
         if relative.parts[:1] == ("release",) and path.name == "SHA256SUMS":

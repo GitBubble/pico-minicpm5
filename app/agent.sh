@@ -7,6 +7,19 @@ APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 MAX_NEW=${MAX_NEW:-}
 THINKING=${THINKING:-0}
 FIXED_PREFIX_SNAPSHOTS=${FIXED_PREFIX_SNAPSHOTS:-1}
+CONTEXT_PROFILE=${CONTEXT_PROFILE:-}
+# EAGER_TOOL_PREFILL=0|1 (default 0) is handled by chat.sh, which owns the
+# command line; it is exported through this exec unchanged. Turning it on
+# prefills a streaming tool's output while the tool still runs.
+
+if [ -n "$CONTEXT_PROFILE" ]; then
+  if [ -n "${PICO_PROFILE:-}" ] && [ "$PICO_PROFILE" != "$CONTEXT_PROFILE" ]; then
+    echo "CONTEXT_PROFILE and PICO_PROFILE select different profiles" >&2
+    exit 2
+  fi
+  PICO_PROFILE=$CONTEXT_PROFILE
+  export PICO_PROFILE
+fi
 
 case "$THINKING" in
   1|true|TRUE|on|ON)

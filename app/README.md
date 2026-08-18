@@ -29,7 +29,7 @@ Python package is needed.
 │   ├── lib/{libsvp_acl.so,libsvp_aicpu.so,libprotobuf-c.so.1,libsecurec.so}
 │   ├── bin/pico_persistent_acl_executor.aarch64
 │   ├── native/{Makefile,pico_persistent_acl_executor.c}
-│   ├── profiles/{ctx128,ctx1024,ctx4096,ctx8192}.json
+│   ├── profiles/{ctx128,ctx1024,ctx4096,ctx8192,ctx10240,ctx16384}.json
 │   └── src/{merged_board_server.py,minicpm_agent.py,
 │            minicpm_profile.py,
 │            pico_minicpm5_split_board_runner.py,probe_om_execute_latency.py,
@@ -37,7 +37,9 @@ Python package is needed.
 ├── models/{prefill.om,decode.om,head_flat.om}          # qualified ctx1024
 ├── models/ctx128/{prefill.om,decode.om}                # when qualified
 ├── models/ctx4096/decode.om                            # qualified; prefill is the shared models/prefill.om
-├── models/ctx8192/decode.om                            # pending (calibration not native); shared prefill
+├── models/ctx8192/decode.om                            # qualified; shared prefill
+├── models/ctx10240/decode.om                           # pending; shared prefill
+├── models/ctx16384/decode.om                           # pending; shared prefill
 └── assets/{token_embedding.f16.bin,tokenizer.json}
 ```
 
@@ -67,6 +69,7 @@ chmod +x app/*.sh app/bin/pico_persistent_acl_executor.aarch64
 # Explicit profile selection. ctx128 is chat-only.
 ./app/chat.sh --profile ctx128
 ./app/agent.sh --profile ctx4096
+CONTEXT_PROFILE=ctx8192 ./app/agent.sh
 ```
 
 ```text
@@ -296,8 +299,9 @@ make SDK_ROOT=/path/to/sdk/smp/a55_linux/mpp/out CC=aarch64-mix210-linux-gcc
 
 The runtime-profile and hybrid-routing contract is documented in the source
 repository's [Agent routing and runtime-context profile design](https://github.com/GitBubble/pico-minicpm5/blob/main/docs/AGENT_ROUTING_AND_CONTEXT_PROFILES.md).
-ctx128 is deliberately chat-only. ctx4096 and ctx8192 remain pending until
-their exact OM sets pass descriptor, numeric (`>0.98`) and board gates;
+ctx128 is deliberately chat-only. ctx8192 is qualified, including strict EOS
+and the 4097-token prompt-head-skip gate. ctx10240 and ctx16384 remain pending
+until their exact OM sets pass descriptor, numeric (`>0.98`) and board gates;
 controlled development requires the explicit `--allow-unqualified-profile`.
 
 On the `v0.2.0` executor the ctx1024 profile measures `100.40 ms/token`, or

@@ -28,17 +28,25 @@ def test_builtin_profile_matrix_and_limits(tmp_path: Path) -> None:
     profiles = _module()
     loaded = {
         name: profiles.load_runtime_profile(name, PROFILES)
-        for name in ("ctx128", "ctx1024", "ctx4096", "ctx8192")
+        for name in (
+            "ctx128", "ctx1024", "ctx4096", "ctx8192", "ctx10240",
+            "ctx16384")
     }
 
-    assert [loaded[name].context for name in loaded] == [128, 1024, 4096, 8192]
+    assert [loaded[name].context for name in loaded] == [
+        128, 1024, 4096, 8192, 10240, 16384]
     assert loaded["ctx128"].chat and not loaded["ctx128"].agent
-    assert all(loaded[name].agent for name in ("ctx1024", "ctx4096", "ctx8192"))
+    assert all(loaded[name].agent for name in (
+        "ctx1024", "ctx4096", "ctx8192", "ctx10240", "ctx16384"))
     assert loaded["ctx1024"].status == "qualified"
     assert loaded["ctx4096"].status == "qualified"
-    assert loaded["ctx8192"].status == "pending"
+    assert loaded["ctx8192"].status == "qualified"
+    assert loaded["ctx10240"].status == "pending"
+    assert loaded["ctx16384"].status == "pending"
     assert loaded["ctx4096"].max_new_limit == 512
     assert loaded["ctx8192"].max_new_limit == 1024
+    assert loaded["ctx10240"].max_new_limit == 1024
+    assert loaded["ctx16384"].max_new_limit == 2048
     assert loaded["ctx1024"].kv_output_slots == (0, 1)
     assert loaded["ctx1024"].hidden_output_slot == 2
     assert loaded["ctx4096"].model_paths(tmp_path)["decode"] == (
@@ -46,8 +54,8 @@ def test_builtin_profile_matrix_and_limits(tmp_path: Path) -> None:
     # Mixed prefill-window contract: the extended contexts bootstrap
     # position 0 with the qualified ctx1024 prefill binary.
     assert [loaded[name].prefill_window for name in loaded] == [
-        128, 1024, 1024, 1024]
-    for name in ("ctx4096", "ctx8192"):
+        128, 1024, 1024, 1024, 1024, 1024]
+    for name in ("ctx4096", "ctx8192", "ctx10240", "ctx16384"):
         assert loaded[name].model_paths(tmp_path)["prefill"] == (
             tmp_path / "models/prefill.om")
 
@@ -65,11 +73,17 @@ def test_ctx128_agent_fails_before_pending_status() -> None:
 
 def test_pending_long_context_needs_explicit_development_override() -> None:
     profiles = _module()
-    ctx8192 = profiles.load_runtime_profile("ctx8192", PROFILES)
+    for name in ("ctx10240", "ctx16384"):
+        profile = profiles.load_runtime_profile(name, PROFILES)
+        with pytest.raises(profiles.ProfileError,
+                           match="allow-unqualified-profile"):
+            profile.require_mode("agent")
+        profile.require_mode("agent", allow_unqualified=True)
 
-    with pytest.raises(profiles.ProfileError, match="allow-unqualified-profile"):
-        ctx8192.require_mode("agent")
-    ctx8192.require_mode("agent", allow_unqualified=True)
+
+def test_qualified_ctx8192_needs_no_override() -> None:
+    profiles = _module()
+    profiles.load_runtime_profile("ctx8192", PROFILES).require_mode("agent")
 
 
 def test_qualified_mixed_contract_profile_needs_no_override() -> None:

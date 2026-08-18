@@ -22,7 +22,7 @@ import re
 
 SCHEMA = "pico.minicpm5.context-profile-qualification.v1"
 COSINE_FLOOR_EXCLUSIVE = 0.98
-KNOWN_CONTEXTS = (128, 1024, 4096, 8192)
+KNOWN_CONTEXTS = (128, 1024, 4096, 8192, 10240, 16384)
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _LOCALHOST_LEAK = re.compile(r"/(?:Users|home|root)/|(?:\d{1,3}\.){3}\d{1,3}")
 

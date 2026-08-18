@@ -42,15 +42,17 @@ only as an experimental, fail-closed recovery path.
 
 ## Status
 
-`v0.2.0` ships three decode contexts. All three were measured on an Hi3403
-board in one session on the retain-input executor `cef4edb2…`, and all three
-produced tokens identical to their own qualified baseline.
+`v0.2.1` adds runtime contracts for five decode contexts. Long-context OM files
+remain owner-supplied artifacts; the source release does not redistribute
+weights, licensed libraries or locally compiled models.
 
 | Profile | p50 / token | token/s | Prompt ingestion | Status |
 |---|---:|---:|---:|---|
 | ctx1024 | 100.40 ms | **9.96** | 79.49 ms/token | qualified |
 | ctx4096 | 127.96 ms | **7.81** | 106.28 ms/token | qualified |
-| ctx8192 | 165.71 ms | **6.03** | 144.02 ms/token | pending |
+| ctx8192 | 165.71 ms | **6.03** | 146.82 ms/token (4097-token gate) | qualified |
+| ctx10240 | 185.78 ms | **5.38** | 166.26 ms/token (4097-token gate) | pending |
+| ctx16384 | 242.51 ms | **4.12** | 222.25 ms/token (4097-token gate) | pending |
 
 The contexts differ only in `decode.om`. Every profile bootstraps position zero
 on the same frozen `ctx1024` `prefill.om` and shares one `head_flat.om`, byte
@@ -66,9 +68,13 @@ What each profile passed:
 - `ctx4096`: minimum public-output cosine `0.990820` at position 4095, board
   tail byte-exact with the simulator, `48/48` greedy tokens, boundary
   fail-closed. Gate record `release/contexts/ctx4096.qualification.json`.
-- `ctx8192`: public outputs clear the gate at `0.986076` and its EOS gate
-  passes, but its calibration is donor-zero-extended rather than native, so it
-  stays `pending` and needs `--allow-unqualified-profile`.
+- `ctx8192`: minimum public output `0.986076`, 48/48 greedy tokens, corrected
+  period-plus-EOS exact, 4097-token head-skip and live-memory/JSONL gates PASS.
+- `ctx10240`: long prompt, EOS and operational gates pass, but the greedy suite
+  is 36/48 and tail hidden cosine is `0.978842`; it remains pending.
+- `ctx16384`: short greedy/EOS and long-prompt operational gates pass, but the
+  best recalibrated tail hidden/K/V is `0.957146/0.985295/0.967172`; it remains
+  pending.
 
 EOS terminates cleanly on all three and the 48-token oracle passes on all
 three. Measured against the re-derived FP64 reference, `ctx8192` reproduces the
@@ -95,6 +101,7 @@ change and are not re-uploaded:
 
 | From | What | Why |
 |---|---|---|
+| [`v0.2.1`](https://github.com/GitBubble/pico-minicpm5/releases/tag/v0.2.1) | source distributions, SBOM, long-context runtime/profile code | source-only; no OM redistribution |
 | [`v0.2.0`](https://github.com/GitBubble/pico-minicpm5/releases/tag/v0.2.0) | runtime archive, `SHA256SUMS` | carries the `app/` board application and executor `cef4edb2…` |
 | [`v0.1.0`](https://github.com/GitBubble/pico-minicpm5/releases/tag/v0.1.0) | `prefill.om`, `decode.om`, `head_flat.om`, token embedding, tokenizer | byte-identical in `v0.2.0`, so they stay where they are |
 | [`v0.1.0-ctx-preview`](https://github.com/GitBubble/pico-minicpm5/releases/tag/v0.1.0-ctx-preview) | `decode.ctx4096.om`, `decode.ctx8192.om` | only needed for the extended-context profiles |

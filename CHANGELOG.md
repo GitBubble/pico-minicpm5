@@ -2,7 +2,23 @@
 
 [中文](CHANGELOG.zh-CN.md)
 
-## Unreleased
+## 0.2.1 - 2026-08-18
+
+### Long-context profiles and Agent integration
+
+- Added fail-closed `ctx10240` and `ctx16384` profiles and exposed
+  `CONTEXT_PROFILE=ctx8192|ctx10240|ctx16384` through `app/agent.sh`.
+- Bound all three long contexts to exact descriptor-checked workspace
+  retention and kept teacher-forced prompt head-skip enabled. The 4097-token
+  workload passed at 8192/10240/16384 in 602.48/681.89/910.42 seconds.
+- Qualified ctx8192: all public outputs are strictly above `0.98`, the frozen
+  greedy suite is 48/48, and the corrected period-plus-EOS oracle is exact.
+- ctx10240 remains pending (36/48 greedy and tail hidden `0.978842`); ctx16384
+  remains pending (best tail hidden/K/V `0.957146/0.985295/0.967172`).
+- Added guarded eager tool-output prefill, dynamic source-release/SBOM version
+  handling, and v0.2.1 acceptance/release notes.
+
+### Euler Pi factory-image bring-up
 
 - Board scripts `app/prepare_npu.sh`, `app/board_env.sh`, `app/install_board.sh`:
   Euler Pi factory Linux inserts `ot_pqp.ko`, which is mutually exclusive with

@@ -15,4 +15,4 @@ source-release:
 	PYTHONPATH=src $(PYTHON) -m pico_minicpm5.cli release source --out artifacts
 
 sbom:
-	PYTHONPATH=src $(PYTHON) -m pico_minicpm5.cli release sbom --out artifacts/pico-minicpm5-0.1.0.spdx.json
+	PYTHONPATH=src $(PYTHON) -m pico_minicpm5.cli release sbom --out artifacts/pico-minicpm5-$$(PYTHONPATH=src $(PYTHON) -c 'from pico_minicpm5 import __version__; print(__version__)').spdx.json

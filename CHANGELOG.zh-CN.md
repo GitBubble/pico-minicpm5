@@ -2,7 +2,23 @@
 
 [English](CHANGELOG.md)
 
-## Unreleased
+## 0.2.1 - 2026-08-18
+
+### 长上下文 Profile 与 Agent 接入
+
+- 新增 fail-closed `ctx10240`、`ctx16384` profile，并通过 `app/agent.sh`
+  支持 `CONTEXT_PROFILE=ctx8192|ctx10240|ctx16384`。
+- 三个长 context 均绑定 descriptor 严格校验的 workspace retention，并保留
+  teacher-forced prompt head-skip；4097-token 用例分别耗时
+  602.48/681.89/910.42 秒且全部通过。
+- ctx8192 完成资格化：全部公开输出严格高于 `0.98`，冻结 greedy 用例 48/48，
+  修正后的“句号 + EOS”官方序列精确一致。
+- ctx10240 因 36/48 与尾 hidden `0.978842` 保持 pending；ctx16384 因最佳尾部
+  hidden/K/V 仅 `0.957146/0.985295/0.967172` 保持 pending。
+- 加入受保护的 eager tool-output prefill、动态 source-release/SBOM 版本处理与
+  v0.2.1 验收/发行说明。
+
+### Euler Pi 出厂镜像 bring-up
 
 - 板端新增 `app/prepare_npu.sh`、`app/board_env.sh`、`app/install_board.sh`：
   Euler Pi 出厂镜像会装 `ot_pqp.ko`，与 `ot_svp_npu` 互斥；安装脚本卸 pqp、

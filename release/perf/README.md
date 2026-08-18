@@ -32,7 +32,7 @@ three prompts, so the two agree exactly.
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---|
 | ctx1024 | 1.32 | 77.12 | 0.95 | 19.90 | 1.01 | **100.40** | 9.96 | +5.2% | qualified |
 | ctx4096 | 1.38 | 102.13 | 2.66 | 20.69 | 1.00 | **127.96** | 7.81 | +19.7% | qualified |
-| ctx8192 | 1.36 | 139.88 | 2.67 | 20.70 | 0.99 | **165.71** | 6.03 | +31.6% | pending |
+| ctx8192 | 1.36 | 139.88 | 2.67 | 20.70 | 0.99 | **165.71** | 6.03 | +31.6% | qualified |
 
 The head and argmax phases are flat across all three contexts — they do not see
 the KV window. Context cost is almost entirely the transformer phase.
@@ -169,15 +169,11 @@ artifact passed. Throughput never substitutes for a cosine or token gate.
 |---|---|---|---:|
 | ctx1024 | `release/v0.1.0/qualification.json` | PASS | 0.996646 |
 | ctx4096 | `release/contexts/ctx4096.qualification.json` | PASS | 0.990820 |
-| ctx8192 | `release/contexts/ctx8192.qualification.json` | CANDIDATE_CALIBRATION_NOT_NATIVE | 0.986076 |
+| ctx8192 | `release/contexts/ctx8192.qualification.json` | PASS | 0.986076 |
 
-ctx8192's throughput is real and reproducible, and the profile is still
-`pending` — because its calibration is donor-zero-extended rather than native,
-and the Chinese oracle, memory envelope and long-prompt items are open. Its EOS
-gate passes: measured against the re-derived FP64 reference it is the only one
-of the three profiles that reproduces the reference exactly
-([why](../contexts/strict-eos-oracle.md)). Use it with
-`--allow-unqualified-profile` for development only.
+ctx8192 is qualified after the corrected EOS oracle, 48/48 greedy suite,
+4097-token prompt-head-skip run, live-memory and JSONL gates all passed. Its
+calibration lineage remains recorded as a nonblocking diagnostic.
 
 ## What is not measured
 

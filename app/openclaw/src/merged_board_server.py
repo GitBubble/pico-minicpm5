@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 from pathlib import Path
 import struct
 import subprocess
@@ -33,6 +34,8 @@ import sys
 import time
 
 HERE = Path(__file__).resolve().parent
+if os.environ.get("PICO_MINICPM5_SHARED_SRC"):
+    sys.path.insert(0, os.environ["PICO_MINICPM5_SHARED_SRC"])
 sys.path.insert(0, str(HERE))
 
 import qualify_minicpm_greedy_chain as gc  # noqa: E402

@@ -135,6 +135,8 @@ Profile 在进程启动时选择：
 ./app/agent.sh --profile ctx1024
 ./app/agent.sh --profile ctx4096
 ./app/agent.sh --profile ctx8192
+CONTEXT_PROFILE=ctx10240 ./app/agent.sh --allow-unqualified-profile
+CONTEXT_PROFILE=ctx16384 ./app/agent.sh --allow-unqualified-profile
 ```
 
 也可直接指定文件：
@@ -154,15 +156,16 @@ Profile 在进程启动时选择：
 | ctx1024 | 支持 | 支持 | 默认本地 Agent |
 | ctx4096 | 支持 | 支持 | 文档、代码、多步任务 |
 | ctx8192 | 支持 | 支持 | 超长上下文和长会话 |
+| ctx10240 | 支持 | 支持 | 受控 10K context 开发 |
+| ctx16384 | 支持 | 支持 | 受控 16K context 开发 |
 
 执行 `agent.sh --profile ctx128` 必须在加载模型句柄前失败，并提示改用
 `chat.sh --profile ctx128`。
 
-各 profile 的资格状态：ctx1024 与 ctx4096 为 `qualified`（ctx4096 走混合
-prefill 窗口契约，由 `release/contexts/ctx4096.qualification.json` 把关）；
-ctx128 与 ctx8192 保持 `pending`。ctx8192 的候选证据已入库
-（`release/contexts/ctx8192.qualification.json`），严格 EOS 序列门 FAIL，
-因此仍需 `--allow-unqualified-profile`。
+各 profile 的资格状态：ctx1024、ctx4096 与 ctx8192 为 `qualified`（ctx4096
+走混合 prefill 窗口契约；ctx8192 由修正后的严格 EOS 与长 prompt 重验收记录
+把关）。ctx128、ctx10240 与 ctx16384 保持 `pending`；后两档在尾部数值与 token
+门通过前仍需 `--allow-unqualified-profile`。
 
 ### 4.2 静态 ABI 与内存
 
@@ -178,6 +181,8 @@ ctx128 与 ctx8192 保持 `pending`。ctx8192 的候选证据已入库
 | 1024 | 12,570,624 B（约 12 MiB） | 约 24 MiB |
 | 4096 | 50,319,360 B（约 48 MiB） | 约 96 MiB |
 | 8192 | 100,651,008 B（约 96 MiB） | 约 192 MiB |
+| 10240 | 125,816,832 B（约 120 MiB） | 约 240 MiB |
+| 16384 | 201,314,304 B（约 192 MiB） | 约 384 MiB |
 
 加载器必须 fail-closed：decode 的 attention mask 宽度与 K/V past length 对齐
 profile capacity，prefill 句柄的 mask 宽度与 K/V past length 对齐声明的

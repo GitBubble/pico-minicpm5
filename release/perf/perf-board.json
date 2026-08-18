@@ -335,7 +335,7 @@
    "profile": "ctx8192",
    "context": 8192,
    "prefill_window": 1024,
-   "status": "pending",
+   "status": "qualified",
    "contract": "mixed prefill window (position zero on the frozen ctx1024 prefill.om)",
    "runtime_mode": "resident packed K/V, retain-input v1 executor (ELF cef4edb2, supersedes zero-once v2_352; measured parity 167.266 ms / 5.9785 tok/s, binding evidence scratchpad/c8192_retain_ab_20260815/binding/)",
    "steady_state_scope": "67 pooled steps at position >= 1 across the same 3 prompts, one board session for all three profiles",
@@ -384,8 +384,8 @@
     },
     "evidence": {
      "in_repo": false,
-     "source_record": "MINICPM5_CONTEXT8192_QUALIFICATION.json",
-     "source_sha256": "14cd2620a3c0dfaf48692f6a2ec2684745611e1693c635dcae549f643a91739b",
+     "source_record": "ctx8192.acceptance-20260818.json",
+     "source_sha256": "103bfce2acc83fffc53ca459a6a65a91b31540aae0ed0ee69e77368f2c1de474",
      "files": [
       {
        "path": "p24c8192_agent_stock/board_zero_once_v2_352_16.json",
@@ -484,8 +484,8 @@
       "provides": "3-prompt resident oracle, phase records"
      }
     ],
-    "source_record": "MINICPM5_CONTEXT8192_QUALIFICATION.json",
-    "source_sha256": "14cd2620a3c0dfaf48692f6a2ec2684745611e1693c635dcae549f643a91739b"
+    "source_record": "ctx8192.acceptance-20260818.json",
+    "source_sha256": "103bfce2acc83fffc53ca459a6a65a91b31540aae0ed0ee69e77368f2c1de474"
    },
    "position_zero_ms": {
     "transformer": 86.012,
@@ -820,7 +820,7 @@
      "sha256": "e6c14f285c128c51ac9ca9a627f3fe60abd1012423e254dcc9e9829a92c2ca89"
     }
    ],
-   "long_prompt_status": "not measured; the source record marks its own long-prompt figure measured_long_prompt=false and accepted_as_long_prompt_qualification=false"
+   "long_prompt_status": "PASS; 4097 prompt tokens, next token 12945 exact, 4096 head calls skipped, 602.477 s ingest"
   },
   "unbound_prose_claims": {
    "note": "these figures appear in README, CHANGELOG, the routing doc and the v0.1.0 release notes but have no retrievable per-step record anywhere; they were produced live on the board and only summarized. They are reproduced here as prose provenance, not as board-bound evidence, and no gate depends on them.",
@@ -831,7 +831,7 @@
    "resolution": "re-run both on the board with the report written to disk, then promote them into the measured table above"
   },
   "not_measured": [
-   "long-prompt TTFT for ctx1024, ctx4096 and ctx8192: the largest measured prompt on any published profile is 12 tokens",
+   "long-prompt TTFT for ctx1024 and ctx4096: ctx8192 now has a 4097-token board record",
    "TTFT with a resident-prefix hit or a fixed-prefix snapshot: no run with those metrics was written to disk",
    "TTFT with wide prefill blocks (S16/S32/S128): only strict S1 is enabled in the qualified release",
    "cold-start model load is excluded from every number above; it was 2.6-12.9 s across the recorded runs"
@@ -892,7 +892,7 @@
     "gate_record": "release/contexts/ctx8192.qualification.json",
     "decode_om_sha256": "1c1c345deddf64e3af3b3c89bee07aba65035620d9e08d69b11b6c9aeb233c3d",
     "prefill_om_sha256": "fea09d294513839ccab846050193def475859f4352e2cb3fad7c2f8f1dfa4536",
-    "gate_verdict": "CANDIDATE_CALIBRATION_NOT_NATIVE",
+    "gate_verdict": "PASS",
     "minimum_public_output": 0.9860760661
    }
   ]
@@ -903,6 +903,6 @@
   "separation of first-step warm-up from tail-position cost: the tail runs execute exactly one step",
   "ctx128: no board performance run exists",
   "executor-mode A/B at ctx1024 or ctx4096: the five-mode comparison was run at ctx8192 only",
-  "prompts longer than the prefill window under the mixed contract: every recorded run used 2-13 token prompts"
+  "prompts longer than the prefill window at ctx1024 and ctx4096; ctx8192 has a 4097-token record"
  ]
 }

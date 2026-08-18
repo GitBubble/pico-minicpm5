@@ -26,8 +26,26 @@ import pico_minicpm5_split_board_runner as runner  # noqa: E402
 
 
 def _start(executable: Path, models: Sequence[Path], library_paths: Sequence[Path],
-           device: int, *, quiet: bool = False) -> subprocess.Popen:
+           device: int, *, quiet: bool = False,
+           extra_executor_args: Sequence[str] = ()) -> subprocess.Popen:
+    extra_executor_args = tuple(extra_executor_args)
+    qualified = {
+        (),
+        ("--no-cache",),
+        ("--no-cache-model", "0"),
+        ("--no-cache-model", "0", "--retain-input",
+         "0:6:5:206127104"),
+        ("--no-cache-model", "0", "--retain-input",
+         "0:6:5:257638400"),
+        ("--no-cache-model", "0", "--retain-input",
+         "0:6:5:412188672"),
+    }
+    if extra_executor_args not in qualified:
+        raise ValueError(
+            "extra executor arguments must select only the qualified global "
+            "or model-0 cache/workspace policy")
     command = [str(executable), "--device", str(device)]
+    command.extend(extra_executor_args)
     for model in models:
         command.extend(("--model", str(model)))
     environment = os.environ.copy()

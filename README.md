@@ -44,8 +44,10 @@ only as an experimental, fail-closed recovery path.
 
 `v0.2.1` adds runtime contracts for five decode contexts. Qualification
 numbers below were measured on **Euler Pi** (commercial
-`SS928V100_SDK_V2.0.2.2`). The same `ctx1024` OM bundle also chat-smokes on
-**Orange Pi AIfly** (community Pegasus / Jammy). Board matrix:
+`SS928V100_SDK_V2.0.2.2`). The same `ctx1024` OM bundle is gated on
+**Orange Pi AIfly** (community Pegasus / Jammy) with the **same**
+`chat.sh --prompt '只回复 PICO_OK' --max-new 8` record: identical token ids,
+identical text, `CHAT_EXIT=0`. Two-board matrix:
 [`app/README.md`](app/README.md). Long-context OM files remain
 owner-supplied artifacts; the source release does not redistribute weights,
 licensed libraries or locally compiled models.

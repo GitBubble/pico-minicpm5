@@ -33,9 +33,25 @@ Jammy / `/usr/lib/svp_npu` → community AIfly).
 | USB IPv4 | host `192.168.137.1`, board `192.168.137.100` | host `192.168.138.1`, board `192.168.138.10` |
 | Runtime | `app/lib/` + `pico_persistent_acl_executor.aarch64` (`cef4edb2…`) | `app/glibc239/` + `pico_persistent_acl_executor.community.bin` (`e4e2a449…`) + board `libsvp_*` + `libpico_mmz_anyaddr.so` |
 | Bring-up | `prepare_npu.sh` (unload `ot_pqp`, load `ot_svp_npu`) | `prepare_community.sh` (stop LightDM, SIGTERM `sample_gfbg`; `BUILD_DESKTOP=no`) |
-| ctx1024 | **qualified** (v0.2.0): `100.40 ms`/token, **9.96** tok/s, `48/48` greedy | **chat smoke** 2026-08-21: 3 handles in `3.1 s`, **~80 ms**/token, `CHAT_EXIT=0` |
-| ctx4096 / ctx8192 | **qualified** (Euler; ctx8192 in v0.2.1) | not re-run |
-| ctx10240 / ctx16384 | pending (Euler only) | not re-run |
+
+Shared ctx1024 gate — **same command on both boards**, recorded in
+[`boards/ctx1024-pico-ok.json`](boards/ctx1024-pico-ok.json):
+
+```bash
+./app/chat.sh --prompt '只回复 PICO_OK' --max-new 8
+```
+
+| | Euler Pi | Orange Pi AIfly |
+|---|---|---|
+| Load | 5.7 s | 3.1 s |
+| `steps_ms` | 85.2–86.5 (p50 **85.7**) | 79.3–81.8 (p50 **80.6**) |
+| Token ids | `[220, 34, 399, 48185, 84, 11552, 242, 10423]` | **identical** |
+| Text | `\n- PICO_OK 是一个` | **identical** |
+| `CHAT_EXIT` | 0 | 0 |
+
+Euler additionally has the v0.2.0 greedy qualification (`100.40 ms`/token,
+**9.96** tok/s, `48/48`) and the ctx4096/ctx8192 gates. Those were not
+re-run on AIfly.
 
 Do not mix the two userspaces. Commercial `app/lib` on the 12 KB community
 `ot_svp_npu` returns `svp_acl_init ret=100000`. Community `libsvp_aicpu.so`

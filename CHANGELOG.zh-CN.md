@@ -18,9 +18,11 @@
 - 主机 USB IPv4 脚本 `configure_orangepi_usb_ipv4.sh` /
   `install_orangepi_usb_ipv4.sh` 把 AIfly gadget 网卡固定为
   `192.168.138.10/24`。
-- `app/README.md` 与 `app/README.zh-CN.md` 给出两板对照：Euler Pi
-  `SS928V100_SDK_V2.0.2.2`（ctx1024 已验收）vs AIfly Pegasus（ctx1024
-  chat 冒烟 2026-08-21）。OM 哈希相同；不要混用用户态。
+- `app/README.md` 与 `app/README.zh-CN.md` 给出两板对照。共用 ctx1024
+  记录是两边同一条 `chat.sh --prompt '只回复 PICO_OK' --max-new 8`：token
+  ids `[220, 34, 399, 48185, 84, 11552, 242, 10423]` 相同、文本相同、
+  `CHAT_EXIT=0`（`app/boards/ctx1024-pico-ok.json`）。Euler 的 48/48 greedy /
+  9.96 tok/s 门仍只算 Euler。
 
 ## 0.2.1 - 2026-08-18
 

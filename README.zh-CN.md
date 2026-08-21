@@ -31,8 +31,10 @@ Hugging Face checkpoint
 ## 当前状态
 
 `v0.2.1` 为五档 decode 上下文提供 runtime 合同。下表数字测自 **Euler Pi**
-（商业 `SS928V100_SDK_V2.0.2.2`）。同一套 `ctx1024` OM 也在 **Orange Pi
-AIfly**（社区 Pegasus / Jammy）上通过 chat 冒烟。两板对照见
+（商业 `SS928V100_SDK_V2.0.2.2`）。同一套 `ctx1024` OM 在 **Orange Pi
+AIfly**（社区 Pegasus / Jammy）上用**同一条**
+`chat.sh --prompt '只回复 PICO_OK' --max-new 8` 过门：token ids 相同、文本
+相同、`CHAT_EXIT=0`。两板对照见
 [`app/README.zh-CN.md`](app/README.zh-CN.md)。长上下文 OM 仍是
 owner-supplied 产物；源码发行不重新分发权重、授权运行库或本地编译模型。
 

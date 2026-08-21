@@ -31,9 +31,24 @@ Ubuntu Jammy / `/usr/lib/svp_npu` → 社区 AIfly）。
 | USB IPv4 | 主机 `192.168.137.1`，板 `192.168.137.100` | 主机 `192.168.138.1`，板 `192.168.138.10` |
 | 运行库 | `app/lib/` + `pico_persistent_acl_executor.aarch64`（`cef4edb2…`） | `app/glibc239/` + `pico_persistent_acl_executor.community.bin`（`e4e2a449…`）+ 板载 `libsvp_*` + `libpico_mmz_anyaddr.so` |
 | 拉起 | `prepare_npu.sh`（卸 `ot_pqp`，装 `ot_svp_npu`） | `prepare_community.sh`（停 LightDM，SIGTERM `sample_gfbg`；`BUILD_DESKTOP=no`） |
-| ctx1024 | **已验收**（v0.2.0）：`100.40 ms`/token，**9.96** tok/s，`48/48` greedy | **chat 冒烟** 2026-08-21：三句柄 `3.1 s`，约 **80 ms**/token，`CHAT_EXIT=0` |
-| ctx4096 / ctx8192 | **已验收**（Euler；ctx8192 在 v0.2.1） | 未复跑 |
-| ctx10240 / ctx16384 | pending（目前只在 Euler 上测） | 未复跑 |
+
+共用 ctx1024 门禁——**两块板同一条命令**，记录在
+[`boards/ctx1024-pico-ok.json`](boards/ctx1024-pico-ok.json)：
+
+```bash
+./app/chat.sh --prompt '只回复 PICO_OK' --max-new 8
+```
+
+| | Euler Pi | Orange Pi AIfly |
+|---|---|---|
+| 加载 | 5.7 s | 3.1 s |
+| `steps_ms` | 85.2–86.5（p50 **85.7**） | 79.3–81.8（p50 **80.6**） |
+| Token ids | `[220, 34, 399, 48185, 84, 11552, 242, 10423]` | **相同** |
+| 文本 | `\n- PICO_OK 是一个` | **相同** |
+| `CHAT_EXIT` | 0 | 0 |
+
+Euler 另外还有 v0.2.0 的 greedy 验收（`100.40 ms`/token，**9.96** tok/s，
+`48/48`）以及 ctx4096/ctx8192 门。这些没有在 AIfly 上复跑。
 
 不要混用两套用户态。商业 `app/lib` 在 12KB 社区 `ot_svp_npu` 上会
 `svp_acl_init ret=100000`。社区 `libsvp_aicpu.so` 要 `fmod@GLIBC_2.38`，

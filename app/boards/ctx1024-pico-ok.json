@@ -1,0 +1,39 @@
+{
+  "schema": "pico.minicpm5.two-board-chat.v1",
+  "profile": "ctx1024",
+  "command": "./app/chat.sh --prompt '只回复 PICO_OK' --max-new 8",
+  "prompt": "只回复 PICO_OK",
+  "max_new": 8,
+  "om_bytes": 1576648939,
+  "token_ids": [220, 34, 399, 48185, 84, 11552, 242, 10423],
+  "text": "\n- PICO_OK 是一个",
+  "reason": "max",
+  "exit": 0,
+  "boards": {
+    "euler_pi": {
+      "product": "Euler Pi 2.0, HiEuerPI_V1.2",
+      "sdk": "SS928V100_SDK_V2.0.2.2",
+      "os": "Linux 4.19.90 aarch64",
+      "runtime": "app/lib + pico_persistent_acl_executor.aarch64",
+      "load_s": 5.7,
+      "steps_ms": [85.3, 86.4, 86.4, 85.2, 85.2, 85.2, 86.0, 86.5],
+      "p50_ms": 85.65
+    },
+    "orangepi_aifly": {
+      "product": "OPI AI Fly",
+      "sdk": "Pegasus / AIfly",
+      "os": "Ubuntu 22.04 Jammy, kernel 6.6.86-hi3403",
+      "runtime": "app/glibc239 + pico_persistent_acl_executor.community.bin",
+      "date": "2026-08-21",
+      "load_s": 3.1,
+      "steps_ms": [81.7, 81.7, 81.8, 79.3, 79.3, 79.3, 79.4, 81.8],
+      "p50_ms": 80.55
+    }
+  },
+  "euler_only": {
+    "greedy_oracle": "48/48",
+    "steady_p50_ms": 100.40,
+    "tokens_per_second": 9.96,
+    "note": "v0.2.0 retain-input executor on Euler Pi; not re-run on AIfly"
+  }
+}

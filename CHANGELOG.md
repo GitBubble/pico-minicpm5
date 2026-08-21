@@ -18,9 +18,12 @@
 - Host USB IPv4 helpers `configure_orangepi_usb_ipv4.sh` /
   `install_orangepi_usb_ipv4.sh` persist `192.168.138.10/24` on the AIfly
   gadget NIC.
-- `app/README.md` and `app/README.zh-CN.md` carry the two-board matrix:
-  Euler Pi `SS928V100_SDK_V2.0.2.2` (ctx1024 qualified) vs AIfly Pegasus
-  (ctx1024 chat smoke 2026-08-21). Same OM hashes; do not mix userspaces.
+- `app/README.md` and `app/README.zh-CN.md` carry the two-board matrix.
+  The shared ctx1024 record is the same `chat.sh --prompt '只回复 PICO_OK'
+  --max-new 8` on both boards: identical token ids
+  `[220, 34, 399, 48185, 84, 11552, 242, 10423]`, identical text, `CHAT_EXIT=0`
+  (`app/boards/ctx1024-pico-ok.json`). Euler's 48/48 greedy / 9.96 tok/s
+  gate stays Euler-only.
 
 ## 0.2.1 - 2026-08-18
 

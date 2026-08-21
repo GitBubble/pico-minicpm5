@@ -194,12 +194,27 @@ def test_source_archive_skips_community_runtime_binaries() -> None:
 
 
 def test_app_readme_two_board_sdk_matrix() -> None:
+    import json
+
+    record = json.loads(
+        (PROJECT / "app" / "boards" / "ctx1024-pico-ok.json").read_text(encoding="utf-8")
+    )
+    ids = record["token_ids"]
+    assert ids == [220, 34, 399, 48185, 84, 11552, 242, 10423]
+    assert record["exit"] == 0
+    assert record["boards"]["euler_pi"]["sdk"] == "SS928V100_SDK_V2.0.2.2"
+    assert record["boards"]["orangepi_aifly"]["load_s"] == 3.1
+    assert record["boards"]["euler_pi"]["steps_ms"]
+    assert record["text"] == "\n- PICO_OK 是一个"
+    id_text = "[220, 34, 399, 48185, 84, 11552, 242, 10423]"
     for name in ("README.md", "README.zh-CN.md"):
         text = (PROJECT / "app" / name).read_text(encoding="utf-8")
         assert "SS928V100_SDK_V2.0.2.2" in text
         assert "Pegasus" in text
         assert "6.6.86-hi3403" in text
-        assert "9.96" in text
-        assert "2026-08-21" in text
         assert "glibc239" in text
         assert "prepare_community.sh" in text
+        assert "只回复 PICO_OK" in text
+        assert id_text in text
+        assert "CHAT_EXIT" in text
+        assert "9.96" in text

@@ -2,6 +2,26 @@
 
 [English](CHANGELOG.md)
 
+## Unreleased
+
+### 社区 SDK（Orange Pi AIfly / Pegasus）
+
+- Ubuntu 22.04 Jammy，内核 `6.6.86-hi3403`：`chat.sh` 选 `app/glibc239/` 加
+  `pico_persistent_acl_executor.community.bin`。双 glibc——系统 2.35 给
+  Python，sidecar 2.39 只给执行器——加载需要 `fmod@GLIBC_2.38` 的 AICPU，
+  不在同一进程混两套 libc。
+- `app/prepare_community.sh` 停 LightDM、对 `sample_gfbg` 发 SIGTERM。图形
+  用户态与推理不能共存；`kill -9` / `rmmod ot_vo` 会挂死板子。
+  `BUILD_DESKTOP=no` 避免桌面被拉起来。
+- `app/lib-community/libpico_mmz_anyaddr.so` 改写 `IOC_MMB_ALLOC_V3`，避免
+  OM 钉在已被占用的 MMZ 基址。
+- 主机 USB IPv4 脚本 `configure_orangepi_usb_ipv4.sh` /
+  `install_orangepi_usb_ipv4.sh` 把 AIfly gadget 网卡固定为
+  `192.168.138.10/24`。
+- `app/README.md` 与 `app/README.zh-CN.md` 给出两板对照：Euler Pi
+  `SS928V100_SDK_V2.0.2.2`（ctx1024 已验收）vs AIfly Pegasus（ctx1024
+  chat 冒烟 2026-08-21）。OM 哈希相同；不要混用用户态。
+
 ## 0.2.1 - 2026-08-18
 
 ### 长上下文 Profile 与 Agent 接入

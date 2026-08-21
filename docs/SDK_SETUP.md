@@ -3,8 +3,15 @@
 [中文](SDK_SETUP.zh-CN.md)
 
 This project does not distribute ATC, DDK, libinstsim, container images or
-`libsvp_custom.so`. The four SVP ACL objects the board executor links ship in
-`app/lib/` (see `app/lib/README.md`).
+`libsvp_custom.so`. Board *runtime* ACL is shipped for two products:
+
+| Board | SDK | Runtime in this tree |
+|---|---|---|
+| Euler Pi 2.0 | `SS928V100_SDK_V2.0.2.2` | `app/lib/` + `pico_persistent_acl_executor.aarch64` |
+| Orange Pi AIfly | Pegasus / AIfly (`/usr/lib/svp_npu`, kernel `6.6.86-hi3403`) | `app/glibc239/` + `community.bin` + `app/lib-community/` |
+
+See `app/lib/README.md` and `app/lib-community/README.md`. Do not mix the two
+userspaces. ATC/DDK for *compiling* OMs remains user-supplied.
 
 The production compiler invocation needs:
 

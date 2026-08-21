@@ -10,7 +10,9 @@
 | Transformers / PyTorch | Float reference capture | Optional Python dependencies; no package bytes vendored |
 | Vendor ATC/DDK/libinstsim | PICO compilation and local simulation | User-supplied; never included in public source or CI artifacts |
 | `libsvp_custom.so` | `ExtendRMSNorm` compile/runtime registration | User-built or user-supplied; never included in this repository |
-| `app/lib/libsvp_acl.so` and siblings | Board executor runtime | Shipped from `SS928V100_SDK_V2.0.2.2`; see `app/lib/README.md` |
+| `app/lib/libsvp_acl.so` and siblings | Euler Pi board executor runtime | Shipped from `SS928V100_SDK_V2.0.2.2`; see `app/lib/README.md` |
+| `app/lib-community/` Pegasus objects | AIfly board executor extras | Shipped from the community Pegasus tree; see `app/lib-community/README.md` |
+| `app/glibc239/` | Executor-only glibc 2.39 sidecar | Ubuntu 24.04 `libc6_2.39-0ubuntu8.8_arm64.deb` (LGPL); Python keeps system 2.35 |
 
 Generated OM and embedding artifacts contain or derive from model parameters.
 Release manifests therefore record them as `derived-model` artifacts even

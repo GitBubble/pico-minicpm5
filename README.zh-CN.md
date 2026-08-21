@@ -30,7 +30,10 @@ Hugging Face checkpoint
 
 ## 当前状态
 
-`v0.2.1` 为五档 decode 上下文提供 runtime 合同。长上下文 OM 仍是
+`v0.2.1` 为五档 decode 上下文提供 runtime 合同。下表数字测自 **Euler Pi**
+（商业 `SS928V100_SDK_V2.0.2.2`）。同一套 `ctx1024` OM 也在 **Orange Pi
+AIfly**（社区 Pegasus / Jammy）上通过 chat 冒烟。两板对照见
+[`app/README.zh-CN.md`](app/README.zh-CN.md)。长上下文 OM 仍是
 owner-supplied 产物；源码发行不重新分发权重、授权运行库或本地编译模型。
 
 | Profile | 每 token p50 | token/s | prompt 送入 | 状态 |
@@ -154,6 +157,15 @@ tar cf - . | ssh root@BOARD_IP \
   'mkdir -p /opt/pico-minicpm5 && tar xf - -C /opt/pico-minicpm5'
 ```
 
+拷完之后用哪块板、哪套 SDK、跑哪条拉起脚本，见
+[`app/README.zh-CN.md`](app/README.zh-CN.md)（Euler Pi 商业版 vs Orange Pi
+AIfly 社区版）。简表：
+
+| 板 | SDK | 拷完之后 |
+|---|---|---|
+| Euler Pi 2.0 | SS928V100_SDK_V2.0.2.2，Linux 4.19.90 | `install_board.sh` / `prepare_npu.sh` |
+| Orange Pi AIfly | Pegasus / Jammy `6.6.86-hi3403` | `prepare_community.sh` + glibc 2.39 sidecar |
+
 ## Euler Pi 出厂镜像：先卸 pqp，再加载 SVP NPU
 
 已验收的板端数字来自 Hi3403 / SS928。易百纳 **Euler Pi 2.0** 出厂 Linux
@@ -205,6 +217,41 @@ ssh root@BOARD_IP /opt/pico-minicpm5/app/board_env.sh
 `chat.sh` / `agent.sh` 在 `/dev/svp_npu` 缺失且厂方 `svp_npu` ko 目录存在时
 会再调用一次 `prepare_npu.sh`。重启后仍依赖 `install_board.sh` 写入的
 `/etc/init.d/S91pico_npu`，否则 `S90autorun` 会再次装上 `ot_pqp`。
+
+## 社区 SDK（Orange Pi AIfly / Pegasus）
+
+两板对照和已测 chat 冒烟数字见
+[`app/README.zh-CN.md`](app/README.zh-CN.md)。AIfly 是 Ubuntu 22.04（glibc
+**2.35**）；社区 `libsvp_aicpu.so` 要 `fmod@GLIBC_2.38`。Python 继续用系统
+libc。只有执行器进程走 `app/glibc239/`（Ubuntu 24.04 `libc6` 2.39）。
+`chat.sh` 拉起 `pico_persistent_acl_executor.community`，用该 loader 跑
+`community.bin`（板上链好的 Pegasus `libsvp_acl.a` + `libss_mpi.a`）。
+
+图形与推理不能共存。`prepare_community.sh` 停 LightDM，对 `sample_gfbg` 发
+SIGTERM（它自己的处理函数会跑 `sample_comm_sys_exit()`）。`kill -9` 和
+`rmmod ot_vo` 会挂死板子。把 `BUILD_DESKTOP` 写成 `no`，避免
+`orangepi-hardware-optimization` 再拉桌面；此时 `load_hi3403` 必须跳过
+`ot_tde` / `ot_vo` / `gfbg` / HDMI，否则 ACL `malloc_fix_addr` 会撞上 MMZ
+基址上的 framebuffer。`libpico_mmz_anyaddr.so` 仍会在请求地址低于 zone 时
+改写 `IOC_MMB_ALLOC_V3`。
+
+USB IPv4 出厂不固定。主机网卡 `192.168.138.1`：
+
+```bash
+./app/configure_orangepi_usb_ipv4.sh --iface en10 --board-ip 192.168.138.10
+```
+
+```bash
+tar cf - -C /tmp/pico-minicpm5-board-stage . \
+  | ssh orangepi@192.168.138.10 'echo orangepi | sudo -S tar xf - -C /opt/pico-minicpm5'
+
+ssh -t orangepi@192.168.138.10 \
+  'echo orangepi | sudo -S /opt/pico-minicpm5/app/prepare_community.sh'
+ssh -t orangepi@192.168.138.10 \
+  'cd /opt/pico-minicpm5 && echo orangepi | sudo -S env TOKENIZERS=/opt/pico-minicpm5/pylib PYTHON=python3 ./app/chat.sh --prompt "只回复 PICO_OK" --max-new 8'
+```
+
+不要把这块板指到商业 `app/lib`（`svp_acl_init ret=100000`）。
 
 ## Euler Pi 出厂镜像：在主机上装 Python 3
 

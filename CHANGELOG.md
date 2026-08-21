@@ -2,6 +2,26 @@
 
 [中文](CHANGELOG.zh-CN.md)
 
+## Unreleased
+
+### Community SDK (Orange Pi AIfly / Pegasus)
+
+- Ubuntu 22.04 Jammy, kernel `6.6.86-hi3403`: `chat.sh` selects
+  `app/glibc239/` plus `pico_persistent_acl_executor.community.bin`. Dual
+  glibc — system 2.35 for Python, sidecar 2.39 for the executor only — loads
+  `fmod@GLIBC_2.38` AICPU without mixing two libc in one process.
+- `app/prepare_community.sh` stops LightDM and SIGTERMs `sample_gfbg`.
+  Graphics userspace and inference cannot coexist; `kill -9` / `rmmod ot_vo`
+  hang the board. `BUILD_DESKTOP=no` keeps the desktop from coming back.
+- `app/lib-community/libpico_mmz_anyaddr.so` rewrites `IOC_MMB_ALLOC_V3`
+  so OM load is not pinned to a busy MMZ base.
+- Host USB IPv4 helpers `configure_orangepi_usb_ipv4.sh` /
+  `install_orangepi_usb_ipv4.sh` persist `192.168.138.10/24` on the AIfly
+  gadget NIC.
+- `app/README.md` and `app/README.zh-CN.md` carry the two-board matrix:
+  Euler Pi `SS928V100_SDK_V2.0.2.2` (ctx1024 qualified) vs AIfly Pegasus
+  (ctx1024 chat smoke 2026-08-21). Same OM hashes; do not mix userspaces.
+
 ## 0.2.1 - 2026-08-18
 
 ### Long-context profiles and Agent integration

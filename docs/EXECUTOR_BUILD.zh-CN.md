@@ -57,3 +57,12 @@ sha256sum pico_persistent_acl_executor.aarch64
 execute 之间保留 workspace 输入而不是反复重写，从而每个 decode 步省下一次完整的
 workspace 写入。节省因此与上下文成正比——ctx1024 `5.5 ms`、ctx4096 `27.6 ms`、
 ctx8192 `54.9 ms`，三点折算下来都落在 `3.7–4.7 GB/s` 的避免流量上。
+
+## 社区板（Orange Pi AIfly）
+
+`pico_persistent_acl_executor.community.bin` 是**同一份 C 源**在板上链
+Pegasus 静态库 `libsvp_acl.a` + `libss_mpi.a` 得到的 ELF，不是 mix210 的
+`cef4edb2…`，也不适用上面的配方。包装器
+`pico_persistent_acl_executor.community` 用 `app/glibc239/`（Ubuntu 24.04
+libc 2.39）拉起它，好让 Jammy 2.35 能加载社区 AICPU（`fmod@GLIBC_2.38`）。
+校验见 `app/bin/SHA256SUMS`。

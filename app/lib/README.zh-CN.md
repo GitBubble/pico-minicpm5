@@ -16,5 +16,6 @@ SDK。
 
 厂方 `/opt/lib/npu` 是 Ascend / `libascendcl.so` 那一套，**不能**代替本目录。
 
-`chat.sh` / `agent.sh` 在本目录存在 `libsvp_acl.so` 时会把它放在
-`LD_LIBRARY_PATH` 最前。校验：`sha256sum -c SHA256SUMS`。
+`chat.sh` / `agent.sh` 在 Euler Pi 出厂镜像上把本目录放在
+`LD_LIBRARY_PATH` 最前。Orange Pi AIfly / Pegasus 必须改用
+`../lib-community/`（见该目录 README）。校验：`sha256sum -c SHA256SUMS`。

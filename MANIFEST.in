@@ -2,6 +2,10 @@ include LICENSE NOTICE THIRD_PARTY_NOTICES.md MODEL_PROVENANCE.md
 include README.md README.zh-CN.md CHANGELOG.md CONTRIBUTING.md SECURITY.md CITATION.cff
 recursive-include app *.py *.c Makefile *.sh *.md *.json
 recursive-include app/lib *.md SHA256SUMS
+recursive-include app/lib-community *.c *.py SHA256SUMS *.md
+recursive-include app/glibc239 SHA256SUMS *.md
+include app/bin/pico_persistent_acl_executor.community
+include app/bin/SHA256SUMS
 recursive-include configs *.json
 recursive-include docs *.md
 recursive-include experimental *.md

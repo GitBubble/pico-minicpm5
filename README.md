@@ -42,9 +42,13 @@ only as an experimental, fail-closed recovery path.
 
 ## Status
 
-`v0.2.1` adds runtime contracts for five decode contexts. Long-context OM files
-remain owner-supplied artifacts; the source release does not redistribute
-weights, licensed libraries or locally compiled models.
+`v0.2.1` adds runtime contracts for five decode contexts. Qualification
+numbers below were measured on **Euler Pi** (commercial
+`SS928V100_SDK_V2.0.2.2`). The same `ctx1024` OM bundle also chat-smokes on
+**Orange Pi AIfly** (community Pegasus / Jammy). Board matrix:
+[`app/README.md`](app/README.md). Long-context OM files remain
+owner-supplied artifacts; the source release does not redistribute weights,
+licensed libraries or locally compiled models.
 
 | Profile | p50 / token | token/s | Prompt ingestion | Status |
 |---|---:|---:|---:|---|
@@ -148,6 +152,15 @@ Copy the assembled directory to the board and start the demo:
 tar cf - . | ssh root@BOARD_IP \
   'mkdir -p /opt/pico-minicpm5 && tar xf - -C /opt/pico-minicpm5'
 ```
+
+Which board, which SDK, and which bring-up to run after the copy is in
+[`app/README.md`](app/README.md) (Euler Pi commercial vs Orange Pi AIfly
+community). Short form:
+
+| Board | SDK | After copy |
+|---|---|---|
+| Euler Pi 2.0 | SS928V100_SDK_V2.0.2.2, Linux 4.19.90 | `install_board.sh` / `prepare_npu.sh` |
+| Orange Pi AIfly | Pegasus / Jammy `6.6.86-hi3403` | `prepare_community.sh` + glibc 2.39 sidecar |
 
 ## Euler Pi factory image: unload pqp, then load SVP NPU
 
@@ -274,6 +287,44 @@ Only if you must refresh from another SDK tree:
 ```bash
 ./app/install_runtime_lib.sh --sdk-root /path/to/SS928V100_SDK_V2.0.2.2
 ```
+
+## Community SDK (Orange Pi AIfly / Pegasus)
+
+Board matrix and the verified chat-smoke numbers live in
+[`app/README.md`](app/README.md). AIfly is Ubuntu 22.04 (glibc **2.35**);
+community `libsvp_aicpu.so` needs `fmod@GLIBC_2.38`. Python keeps the
+system libc. Only the executor process runs under `app/glibc239/`
+(Ubuntu 24.04 `libc6` 2.39). `chat.sh` launches
+`pico_persistent_acl_executor.community` which execs that loader around
+`community.bin` (Pegasus `libsvp_acl.a` + `libss_mpi.a` linked on the
+board).
+
+Graphics and inference cannot coexist. `prepare_community.sh` stops
+LightDM and SIGTERMs `sample_gfbg` (its own handler runs
+`sample_comm_sys_exit()`). `kill -9` and `rmmod ot_vo` hang the board.
+Set `BUILD_DESKTOP=no` so `orangepi-hardware-optimization` does not
+restart the desktop; `load_hi3403` must then skip `ot_tde` / `ot_vo` /
+`gfbg` / HDMI, otherwise ACL `malloc_fix_addr` hits framebuffer slabs at
+the MMZ base. `libpico_mmz_anyaddr.so` still rewrites `IOC_MMB_ALLOC_V3`
+when the requested start is below the zone.
+
+USB IPv4 is not factory-static. Host NIC `192.168.138.1`:
+
+```bash
+./app/configure_orangepi_usb_ipv4.sh --iface en10 --board-ip 192.168.138.10
+```
+
+```bash
+tar cf - -C /tmp/pico-minicpm5-board-stage . \
+  | ssh orangepi@192.168.138.10 'echo orangepi | sudo -S tar xf - -C /opt/pico-minicpm5'
+
+ssh -t orangepi@192.168.138.10 \
+  'echo orangepi | sudo -S /opt/pico-minicpm5/app/prepare_community.sh'
+ssh -t orangepi@192.168.138.10 \
+  'cd /opt/pico-minicpm5 && echo orangepi | sudo -S env TOKENIZERS=/opt/pico-minicpm5/pylib PYTHON=python3 ./app/chat.sh --prompt "只回复 PICO_OK" --max-new 8'
+```
+
+Do not point this board at commercial `app/lib` (`svp_acl_init ret=100000`).
 
 The runtime archive keeps the executor in `app/bin/` and its source in
 `app/native/`. `app/lib/` is the board OM runtime, not ATC/DDK. Override

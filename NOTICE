@@ -13,5 +13,12 @@ components and are not distributed by this project.
 
 The four AArch64 objects in `app/lib/` (`libsvp_acl.so`, `libsvp_aicpu.so`,
 `libprotobuf-c.so.1`, `libsecurec.so`) are the SS928V100_SDK_V2.0.2.2 SVP ACL
-runtime required by the board executor. They ship with the board application
-so a factory Euler Pi image can load OMs without a second SDK checkout.
+runtime required by the Euler Pi board executor. They ship with the board
+application so a factory Euler Pi image can load OMs without a second SDK
+checkout.
+
+`app/lib-community/` holds Pegasus extras for Orange Pi AIfly. `app/glibc239/`
+is the Ubuntu 24.04 `libc6` 2.39 sidecar used only by
+`pico_persistent_acl_executor.community`; the rest of the Jammy image keeps
+glibc 2.35. `pico_persistent_acl_executor.community.bin` is the same executor
+source linked on the board against Pegasus `libsvp_acl.a` and `libss_mpi.a`.

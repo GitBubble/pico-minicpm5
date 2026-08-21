@@ -64,6 +64,14 @@ def source_files(project_root: Path) -> list[Path]:
             continue
         if path.name == ".env" or path.name.startswith(".env."):
             raise ValueError(f"environment file is forbidden in a source release: {relative}")
+        # Community AIfly runtime (Pegasus extras + glibc 2.39 sidecar).
+        # Keep rebuildable sources; skip ELF / .so payloads.
+        if relative.parts[:2] in {("app", "glibc239"), ("app", "lib-community")}:
+            if path.suffix.lower() in DENIED_SUFFIXES:
+                continue
+            with path.open("rb") as stream:
+                if stream.read(4) == b"\x7fELF":
+                    continue
         if path.suffix.lower() in DENIED_SUFFIXES:
             raise ValueError(f"denied artifact in source tree: {relative}")
         with path.open("rb") as stream:

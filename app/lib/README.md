@@ -19,4 +19,6 @@ Factory `/opt/lib/npu` is the Ascend/`libascendcl.so` stack and **cannot**
 substitute for this directory.
 
 `chat.sh` / `agent.sh` put `app/lib` first on `LD_LIBRARY_PATH` when
-`libsvp_acl.so` is present. Verify with `sha256sum -c SHA256SUMS`.
+`libsvp_acl.so` is present on an Euler Pi factory image. Orange Pi AIfly /
+Pegasus must use `../lib-community/` instead. Verify with
+`sha256sum -c SHA256SUMS`.

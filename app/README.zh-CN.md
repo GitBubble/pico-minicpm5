@@ -13,6 +13,33 @@
 README。直接运行不需要重新导出 ONNX、不需要
 调用 ATC，也不需要在板端安装本项目的 host 构建包。
 
+## 两块板、两套 SDK
+
+同一套 `ctx1024` 三句柄（`prefill.om` / `decode.om` / `head_flat.om`，
+`v0.1.0` 哈希）跑在两款 Hi3403 产品上。**OM 文件相同**，用户态和 NPU 拉起
+方式不同。`chat.sh` 按镜像选择运行库（`/opt/ko/svp_npu` → 商业 Euler Pi；
+Ubuntu Jammy / `/usr/lib/svp_npu` → 社区 AIfly）。
+
+| | Euler Pi（商业 SDK） | Orange Pi AIfly（社区 SDK） |
+|---|---|---|
+| 产品 | Euler Pi 2.0，HiEuerPI_V1.2 | OPI AI Fly |
+| 芯片 | SS928V100 / Hi3403 | SS928V100 / Hi3403 |
+| SDK | **SS928V100_SDK_V2.0.2.2** | **Pegasus / AIfly**（`/usr/lib/svp_npu`，内核 `6.6.86-hi3403`） |
+| 系统 | 出厂 Linux **4.19.90** aarch64 | Ubuntu **22.04 Jammy** |
+| glibc | 2.29 | 系统 **2.35** + 执行器 sidecar **2.39**（`libc6_2.39-0ubuntu8.8`） |
+| 登录 | `root` / `ebaina` | `orangepi` / `orangepi` |
+| USB IPv4 | 主机 `192.168.137.1`，板 `192.168.137.100` | 主机 `192.168.138.1`，板 `192.168.138.10` |
+| 运行库 | `app/lib/` + `pico_persistent_acl_executor.aarch64`（`cef4edb2…`） | `app/glibc239/` + `pico_persistent_acl_executor.community.bin`（`e4e2a449…`）+ 板载 `libsvp_*` + `libpico_mmz_anyaddr.so` |
+| 拉起 | `prepare_npu.sh`（卸 `ot_pqp`，装 `ot_svp_npu`） | `prepare_community.sh`（停 LightDM，SIGTERM `sample_gfbg`；`BUILD_DESKTOP=no`） |
+| ctx1024 | **已验收**（v0.2.0）：`100.40 ms`/token，**9.96** tok/s，`48/48` greedy | **chat 冒烟** 2026-08-21：三句柄 `3.1 s`，约 **80 ms**/token，`CHAT_EXIT=0` |
+| ctx4096 / ctx8192 | **已验收**（Euler；ctx8192 在 v0.2.1） | 未复跑 |
+| ctx10240 / ctx16384 | pending（目前只在 Euler 上测） | 未复跑 |
+
+不要混用两套用户态。商业 `app/lib` 在 12KB 社区 `ot_svp_npu` 上会
+`svp_acl_init ret=100000`。社区 `libsvp_aicpu.so` 要 `fmod@GLIBC_2.38`，
+Jammy 2.35 必须走 sidecar loader。AIfly 上图形（LightDM / `sample_gfbg`）
+与推理不能共存——停用户态，不要 `rmmod gfbg`/`ot_vo`。
+
 ## 板端目录结构
 
 ```text
@@ -25,8 +52,12 @@ README。直接运行不需要重新导出 ONNX、不需要
 │   ├── install_board.sh
 │   ├── install_python.sh
 │   ├── install_runtime_lib.sh
+│   ├── prepare_community.sh
 │   ├── lib/{libsvp_acl.so,libsvp_aicpu.so,libprotobuf-c.so.1,libsecurec.so}
-│   ├── bin/pico_persistent_acl_executor.aarch64
+│   ├── lib-community/   # MMZ ioctl 改写 + Pegasus 辅库；Jammy / AIfly
+│   ├── glibc239/        # Ubuntu 24.04 libc sidecar（仅执行器进程）
+│   ├── bin/pico_persistent_acl_executor.aarch64          # Euler Pi
+│   ├── bin/pico_persistent_acl_executor.community[.bin]  # AIfly + glibc239
 │   ├── native/{Makefile,pico_persistent_acl_executor.c}
 │   ├── profiles/{ctx128,ctx1024,ctx4096,ctx8192,ctx10240,ctx16384}.json
 │   └── src/{merged_board_server.py,minicpm_agent.py,
@@ -42,8 +73,13 @@ README。直接运行不需要重新导出 ONNX、不需要
 └── assets/{token_embedding.f16.bin,tokenizer.json}
 ```
 
-执行器运行库随包放在 `app/lib/`（`libsvp_acl.so` 等，见 `lib/README.zh-CN.md`）。
-`chat.sh` 优先用这个目录。厂方 `/opt/lib/npu` 是另一套 Ascend 库，不能替代。
+Euler Pi 用 `app/lib/`（见 `lib/README.zh-CN.md`）和 `.aarch64` 执行器。
+Orange Pi AIfly 用 `app/glibc239/` 加上
+`pico_persistent_acl_executor.community.bin`（静态链 Pegasus `libsvp_acl.a`
++ `libss_mpi.a`，在 2.39 loader 下跑）以及板载 `/usr/lib/svp_npu` AICPU。
+`lib-community/libpico_mmz_anyaddr.so` 改写 `IOC_MMB_ALLOC_V3`，避免 OM
+钉在已被 framebuffer 占用的 MMZ 基址。`chat.sh` 在 Jammy 上选这条路径。
+厂方 `/opt/lib/npu` 是另一套 Ascend 库，不能替代。
 
 Euler Pi 出厂 Linux 会装上 `ot_pqp.ko`，挡住 `/dev/svp_npu`，而且没有
 `python3`。第一次部署请先跑 `./app/install_board.sh`，再在**主机**上跑
@@ -51,7 +87,7 @@ Euler Pi 出厂 Linux 会装上 `ot_pqp.ko`，挡住 `/dev/svp_npu`，而且没�
 「Euler Pi 出厂镜像」两节）。交互式 SSH 登录会打印 Chip / SDK / Hardware /
 Software。
 
-## 直接运行
+## 在 Euler Pi 上运行（商业 SDK）
 
 ```bash
 cd /opt/pico-minicpm5
@@ -68,6 +104,27 @@ chmod +x app/*.sh app/bin/pico_persistent_acl_executor.aarch64
 ./app/chat.sh --profile ctx128
 ./app/agent.sh --profile ctx4096
 CONTEXT_PROFILE=ctx8192 ./app/agent.sh
+```
+
+## 在 Orange Pi AIfly 上运行（社区 SDK）
+
+无桌面 NPU：`prepare_community.sh` 停 LightDM、对 `sample_gfbg` 发 SIGTERM，
+并把 `BUILD_DESKTOP` 写成 `no`。`load_hi3403` 必须在该标志下跳过 `ot_tde` /
+`ot_vo` / `gfbg` / HDMI，否则 ACL `malloc_fix_addr` 会撞上 MMZ 开头的
+framebuffer。不要 `kill -9 sample_gfbg`，不要 `rmmod ot_vo`。
+
+```bash
+cd /opt/pico-minicpm5
+sudo ./app/prepare_community.sh
+sudo env TOKENIZERS=/opt/pico-minicpm5/pylib PYTHON=python3 \
+  ./app/chat.sh --prompt '只回复 PICO_OK' --max-new 8
+sudo env TOKENIZERS=/opt/pico-minicpm5/pylib PYTHON=python3 ./app/chat.sh
+```
+
+USB IPv4 出厂不固定。主机 AIfly 网卡已是 `192.168.138.1` 时：
+
+```bash
+./app/configure_orangepi_usb_ipv4.sh --iface en10 --board-ip 192.168.138.10
 ```
 
 ```text
@@ -243,9 +300,12 @@ readline 处理 UTF-8 编辑，彩色 prompt 的转义序列标记为零宽，�
 | `PICO_MINICPM5_COLOR` | `auto` | `auto`、`always` 或 `never` |
 | `NO_COLOR` | 未设置 | 设置后在 auto 模式关闭 ANSI 颜色 |
 
-运行库依次探测 `app/lib`、`/root/pico_default_smoke/lib` 和
-`/opt/ss928-runtime/lib`（须含 `libsvp_acl.so`）；
-Python 依次探测 `$PICO_MINICPM5_ROOT/venv/bin/python` 和 `python3`。
+Jammy / `/usr/lib/svp_npu` 上，`chat.sh` 用
+`pico_persistent_acl_executor.community` 和 glibc 2.39 sidecar。Euler Pi
+出厂镜像（`/opt/ko/svp_npu`）用 `app/lib` 和 `.aarch64` 执行器。可用
+`PICO_RUNTIME_LIB` 覆盖。Python 依次探测
+`$PICO_MINICPM5_ROOT/venv/bin/python` 和 `python3`。AIfly 自带 `python3`；
+轮子若在 `pylib/` 下，设置 `TOKENIZERS`。
 
 ## 快速排障
 

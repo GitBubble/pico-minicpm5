@@ -1,0 +1,65 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# Run the persistent executor under a sidecar glibc 2.39 loader so community
+# libsvp_aicpu.so (fmod@GLIBC_2.38) can load on Ubuntu 22.04 (glibc 2.35).
+# Python/chat.sh keep the system glibc; only this process uses 2.39.
+set -eu
+
+BIN_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+APP_DIR=$(dirname "$BIN_DIR")
+GLIBC=$APP_DIR/glibc239
+if [ -x "$BIN_DIR/pico_persistent_acl_executor.community.bin" ]; then
+  EXEC=$BIN_DIR/pico_persistent_acl_executor.community.bin
+else
+  EXEC=$BIN_DIR/pico_persistent_acl_executor.aarch64
+fi
+LD=$GLIBC/ld-linux-aarch64.so.1
+
+if [ ! -x "$LD" ] || [ ! -x "$EXEC" ]; then
+  echo "community executor: missing $LD or $EXEC" >&2
+  exit 127
+fi
+
+PRELOAD=""
+MMZ=$APP_DIR/lib-community/libpico_mmz_anyaddr.so
+if [ -e "$MMZ" ]; then
+  PRELOAD=$MMZ
+fi
+# community.bin already statically links ACL+MPI. Extra cmpi stubs
+# override those symbols and svp_acl_init returns 500004.
+case "$EXEC" in
+  *.community.bin) ;;
+  *)
+    STUB=$APP_DIR/lib-community/libpico_mpi_stubs.so
+    if [ -e "$STUB" ]; then
+      PRELOAD="${PRELOAD:+$PRELOAD:}$STUB"
+    fi
+    for so in \
+        /usr/lib/libsecurec.so /lib/libsecurec.so \
+        /usr/lib/libot_irq.so /lib/libot_irq.so \
+        /usr/lib/libot_osal.so /lib/libot_osal.so
+    do
+      [ -e "$so" ] || continue
+      case ":$PRELOAD:" in
+        *":$so:"*) ;;
+        *) PRELOAD="${PRELOAD:+$PRELOAD:}$so" ;;
+      esac
+    done
+    ;;
+esac
+
+LIBS=$GLIBC
+if [ -e /usr/lib/svp_npu/libsvp_acl.so ]; then
+  LIBS=$LIBS:/usr/lib/svp_npu
+fi
+if [ -e "$APP_DIR/lib-community/libsvp_acl.so" ]; then
+  LIBS=$LIBS:$APP_DIR/lib-community
+fi
+LIBS=$LIBS:/usr/lib:/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+
+if [ -n "$PRELOAD" ]; then
+  LD_PRELOAD="$PRELOAD${LD_PRELOAD:+:$LD_PRELOAD}"
+  export LD_PRELOAD
+fi
+
+exec "$LD" --library-path "$LIBS" "$EXEC" "$@"

@@ -63,3 +63,12 @@ input across executes instead of rewriting it, which removes one full
 workspace write per decode step. The saving is therefore proportional to the
 context — `5.5 ms` at ctx1024, `27.6 ms` at ctx4096, `54.9 ms` at ctx8192,
 all three landing at `3.7–4.7 GB/s` of avoided traffic.
+
+## Community board (Orange Pi AIfly)
+
+`pico_persistent_acl_executor.community.bin` is the **same C source** linked
+on the board against Pegasus static `libsvp_acl.a` + `libss_mpi.a`. It is
+not the mix210 `cef4edb2…` ELF and is not covered by the recipe above. The
+wrapper `pico_persistent_acl_executor.community` runs it under
+`app/glibc239/` (Ubuntu 24.04 libc 2.39) so Jammy 2.35 can load community
+AICPU (`fmod@GLIBC_2.38`). Verify with `app/bin/SHA256SUMS`.

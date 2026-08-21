@@ -14,6 +14,35 @@ the `v0.2.0` release and the model files from `v0.1.0`, as the project README
 describes; no ONNX export, ATC compilation or host-side
 Python package is needed.
 
+## Two boards, two SDKs
+
+The same three-handle `ctx1024` bundle (`prefill.om` / `decode.om` /
+`head_flat.om`, `v0.1.0` hashes) runs on two Hi3403 products. The **OM files
+are identical**; the userspace and the NPU bring-up are not. `chat.sh` picks
+the runtime from the image (`/opt/ko/svp_npu` → commercial Euler Pi; Ubuntu
+Jammy / `/usr/lib/svp_npu` → community AIfly).
+
+| | Euler Pi (commercial) | Orange Pi AIfly (community) |
+|---|---|---|
+| Product | Euler Pi 2.0, HiEuerPI_V1.2 | OPI AI Fly |
+| Chip | SS928V100 / Hi3403 | SS928V100 / Hi3403 |
+| SDK | **SS928V100_SDK_V2.0.2.2** | **Pegasus / AIfly** (`/usr/lib/svp_npu`, kernel `6.6.86-hi3403`) |
+| OS | factory Linux **4.19.90** aarch64 | Ubuntu **22.04 Jammy** |
+| glibc | 2.29 | system **2.35** + executor sidecar **2.39** (`libc6_2.39-0ubuntu8.8`) |
+| Login | `root` / `ebaina` | `orangepi` / `orangepi` |
+| USB IPv4 | host `192.168.137.1`, board `192.168.137.100` | host `192.168.138.1`, board `192.168.138.10` |
+| Runtime | `app/lib/` + `pico_persistent_acl_executor.aarch64` (`cef4edb2…`) | `app/glibc239/` + `pico_persistent_acl_executor.community.bin` (`e4e2a449…`) + board `libsvp_*` + `libpico_mmz_anyaddr.so` |
+| Bring-up | `prepare_npu.sh` (unload `ot_pqp`, load `ot_svp_npu`) | `prepare_community.sh` (stop LightDM, SIGTERM `sample_gfbg`; `BUILD_DESKTOP=no`) |
+| ctx1024 | **qualified** (v0.2.0): `100.40 ms`/token, **9.96** tok/s, `48/48` greedy | **chat smoke** 2026-08-21: 3 handles in `3.1 s`, **~80 ms**/token, `CHAT_EXIT=0` |
+| ctx4096 / ctx8192 | **qualified** (Euler; ctx8192 in v0.2.1) | not re-run |
+| ctx10240 / ctx16384 | pending (Euler only) | not re-run |
+
+Do not mix the two userspaces. Commercial `app/lib` on the 12 KB community
+`ot_svp_npu` returns `svp_acl_init ret=100000`. Community `libsvp_aicpu.so`
+needs `fmod@GLIBC_2.38`; Jammy 2.35 cannot load it without the sidecar
+loader. Graphics (LightDM / `sample_gfbg`) and inference cannot run together
+on AIfly — stop the userspace, do not `rmmod` `gfbg`/`ot_vo`.
+
 ## Expected board layout
 
 ```text
@@ -26,8 +55,12 @@ Python package is needed.
 │   ├── install_board.sh
 │   ├── install_python.sh
 │   ├── install_runtime_lib.sh
+│   ├── prepare_community.sh
 │   ├── lib/{libsvp_acl.so,libsvp_aicpu.so,libprotobuf-c.so.1,libsecurec.so}
-│   ├── bin/pico_persistent_acl_executor.aarch64
+│   ├── lib-community/   # MMZ ioctl shim + Pegasus extras; Jammy / AIfly
+│   ├── glibc239/        # Ubuntu 24.04 libc sidecar (executor process only)
+│   ├── bin/pico_persistent_acl_executor.aarch64          # Euler Pi
+│   ├── bin/pico_persistent_acl_executor.community[.bin]  # AIfly + glibc239
 │   ├── native/{Makefile,pico_persistent_acl_executor.c}
 │   ├── profiles/{ctx128,ctx1024,ctx4096,ctx8192,ctx10240,ctx16384}.json
 │   └── src/{merged_board_server.py,minicpm_agent.py,
@@ -43,9 +76,14 @@ Python package is needed.
 └── assets/{token_embedding.f16.bin,tokenizer.json}
 ```
 
-The executor runtime ships in `app/lib/` (`libsvp_acl.so` and siblings; see
-`lib/README.md`). `chat.sh` prefers that directory. Factory `/opt/lib/npu` is
-the Ascend stack and cannot replace it.
+Euler Pi uses `app/lib/` (see `lib/README.md`) and the `.aarch64` executor.
+Orange Pi AIfly uses `app/glibc239/` plus
+`pico_persistent_acl_executor.community.bin` (statically linked Pegasus
+`libsvp_acl.a` + `libss_mpi.a`, run under the 2.39 loader) and the board
+`/usr/lib/svp_npu` AICPU. `lib-community/libpico_mmz_anyaddr.so` rewrites
+`IOC_MMB_ALLOC_V3` so OM load is not pinned to a busy MMZ base.
+`chat.sh` selects this path on Jammy. Factory `/opt/lib/npu` is the Ascend
+stack and cannot replace either.
 
 Euler Pi factory Linux inserts `ot_pqp.ko`, which blocks `/dev/svp_npu`, and
 it has no `python3`. Run `./app/install_board.sh` on first deploy, then from
@@ -53,7 +91,7 @@ the **host** run `./app/install_python.sh --board root@BOARD` (see both
 "Euler Pi factory image" chapters in the project README). Interactive SSH
 login then prints Chip / SDK / Hardware / Software.
 
-## Run on the board
+## Run on Euler Pi (commercial SDK)
 
 ```bash
 cd /opt/pico-minicpm5
@@ -70,6 +108,29 @@ chmod +x app/*.sh app/bin/pico_persistent_acl_executor.aarch64
 ./app/chat.sh --profile ctx128
 ./app/agent.sh --profile ctx4096
 CONTEXT_PROFILE=ctx8192 ./app/agent.sh
+```
+
+## Run on Orange Pi AIfly (community SDK)
+
+Headless NPU: `prepare_community.sh` stops LightDM and SIGTERMs `sample_gfbg`,
+then sets `BUILD_DESKTOP=no`. `load_hi3403` must skip `ot_tde` / `ot_vo` /
+`gfbg` / HDMI when that flag is set, otherwise ACL `malloc_fix_addr` hits
+framebuffer slabs at the MMZ base. Do not `kill -9 sample_gfbg` and do not
+`rmmod ot_vo`.
+
+```bash
+cd /opt/pico-minicpm5
+sudo ./app/prepare_community.sh
+sudo env TOKENIZERS=/opt/pico-minicpm5/pylib PYTHON=python3 \
+  ./app/chat.sh --prompt '只回复 PICO_OK' --max-new 8
+sudo env TOKENIZERS=/opt/pico-minicpm5/pylib PYTHON=python3 ./app/chat.sh
+```
+
+USB IPv4 is not factory-static. From the **host**, with the AIfly NIC at
+`192.168.138.1`:
+
+```bash
+./app/configure_orangepi_usb_ipv4.sh --iface en10 --board-ip 192.168.138.10
 ```
 
 ```text
@@ -271,10 +332,12 @@ recognize these environment overrides:
 | `PICO_MINICPM5_COLOR` | `auto` | `auto`, `always` or `never` |
 | `NO_COLOR` | unset | Disable ANSI colour while in auto mode |
 
-Runtime libraries are detected first at `app/lib`, then
-`/root/pico_default_smoke/lib`, then `/opt/ss928-runtime/lib` (must contain
-`libsvp_acl.so`). Python is detected first at
-`$PICO_MINICPM5_ROOT/venv/bin/python`, then as `python3`.
+On Jammy / `/usr/lib/svp_npu`, `chat.sh` uses
+`pico_persistent_acl_executor.community` and the glibc 2.39 sidecar. On an
+Euler Pi factory image (`/opt/ko/svp_npu`) it uses `app/lib` and the
+`.aarch64` executor. Override with `PICO_RUNTIME_LIB`. Python is detected
+first at `$PICO_MINICPM5_ROOT/venv/bin/python`, then as `python3`. AIfly
+already has `python3`; set `TOKENIZERS` if wheels live under `pylib/`.
 
 ## Quick checks
 

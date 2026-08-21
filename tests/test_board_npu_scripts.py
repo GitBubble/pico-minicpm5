@@ -122,3 +122,84 @@ def test_shipped_svp_acl_libs_are_aarch64_elf() -> None:
         assert struct.unpack_from("<H", data, 18)[0] == 183
         assert hashlib.sha256(data).hexdigest() == digest
         assert digest in sums
+
+
+def test_prepare_community_is_executable_and_parses() -> None:
+    script = PROJECT / "app" / "prepare_community.sh"
+    assert stat.S_IMODE(script.stat().st_mode) & 0o111
+    text = script.read_text(encoding="utf-8")
+    assert "sample_gfbg" in text
+    assert "BUILD_DESKTOP" in text
+    assert "kill -9" not in text or "do not kill -9" in text
+    subprocess.run(["sh", "-n", str(script)], check=True)
+
+
+def test_community_wrapper_uses_glibc239_sidecar() -> None:
+    wrapper = PROJECT / "app" / "bin" / "pico_persistent_acl_executor.community"
+    assert stat.S_IMODE(wrapper.stat().st_mode) & 0o111
+    text = wrapper.read_text(encoding="utf-8")
+    assert "glibc239" in text
+    assert "pico_persistent_acl_executor.community.bin" in text
+    assert "libpico_mmz_anyaddr.so" in text
+    subprocess.run(["sh", "-n", str(wrapper)], check=True)
+
+
+def test_shipped_community_runtime_is_aarch64_elf() -> None:
+    import struct
+
+    def _check(path: Path, digest: str) -> None:
+        data = path.read_bytes()
+        assert data[:4] == b"\x7fELF"
+        assert struct.unpack_from("<H", data, 18)[0] == 183
+        assert hashlib.sha256(data).hexdigest() == digest
+
+    bin_sums = (PROJECT / "app" / "bin" / "SHA256SUMS").read_text(encoding="utf-8")
+    _check(
+        PROJECT / "app" / "bin" / "pico_persistent_acl_executor.community.bin",
+        "e4e2a44905ad427515d21c51f7134425edb094feb7beb2172226af6d3e69aabd",
+    )
+    assert "e4e2a44905ad427515d21c51f7134425edb094feb7beb2172226af6d3e69aabd" in bin_sums
+    assert "cef4edb2ca71a3fd3b2f7ef9612d8090fb25fe95a19c465cd312383cf76a0374" in bin_sums
+
+    lib_dir = PROJECT / "app" / "lib-community"
+    expected = {
+        "libsvp_acl.so": "fc73d80ab946d8078fdc8b3f8ccfac28abbb7d339f2d658afaa540422283c9e0",
+        "libsvp_aicpu.so": "bf53f2987899fd6b169e2ae4da5d8a481795d8959d09ef0882720bdfb5553e8e",
+        "libprotobuf-c.so.1": "a48b2b0e5f1c419dc58d500d4fea775f2f3a2507dba11fdd69f120081e525698",
+        "libsecurec.so": "28a23b130a823689f2f3378eb5624b7cb43946f9d49ef6af58247f1bb696b318",
+        "libpico_mmz_anyaddr.so": "56887afaaa35443f7795e0959bcd44daced408f4969940af29b8e0fef4eb26bb",
+    }
+    sums = (lib_dir / "SHA256SUMS").read_text(encoding="utf-8")
+    for name, digest in expected.items():
+        _check(lib_dir / name, digest)
+        assert digest in sums
+
+    glibc_dir = PROJECT / "app" / "glibc239"
+    glibc_sums = (glibc_dir / "SHA256SUMS").read_text(encoding="utf-8")
+    for line in glibc_sums.splitlines():
+        digest, name = line.split()
+        _check(glibc_dir / name, digest)
+
+
+def test_source_archive_skips_community_runtime_binaries() -> None:
+    from pico_minicpm5.release.source import source_files
+
+    names = {path.relative_to(PROJECT).as_posix() for path in source_files(PROJECT)}
+    assert "app/prepare_community.sh" in names
+    assert "app/lib-community/pico_mmz_anyaddr.c" in names
+    assert "app/lib-community/libsvp_acl.so" not in names
+    assert "app/glibc239/libc.so.6" not in names
+    assert "app/bin/pico_persistent_acl_executor.community.bin" not in names
+    assert "app/lib/libsvp_acl.so" not in names
+
+
+def test_app_readme_two_board_sdk_matrix() -> None:
+    for name in ("README.md", "README.zh-CN.md"):
+        text = (PROJECT / "app" / name).read_text(encoding="utf-8")
+        assert "SS928V100_SDK_V2.0.2.2" in text
+        assert "Pegasus" in text
+        assert "6.6.86-hi3403" in text
+        assert "9.96" in text
+        assert "2026-08-21" in text
+        assert "glibc239" in text
+        assert "prepare_community.sh" in text

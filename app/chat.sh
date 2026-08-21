@@ -16,16 +16,61 @@ fi
 if [ ! -e /dev/svp_npu ] && [ -x "$APP_DIR/prepare_npu.sh" ] && [ -d /opt/ko/svp_npu ]; then
   "$APP_DIR/prepare_npu.sh"
 fi
+# Euler Pi commercial kernel wants app/lib (SS928V100_SDK). Orange Pi /
+# Pegasus community (Jammy + /usr/lib/svp_npu) wants app/lib-community:
+# commercial ACL returns svp_acl_init ret=100000 on the 12KB community
+# ot_svp_npu, and stock Pegasus aicpu needs fmod@GLIBC_2.38 (Jammy is 2.35).
+COMMUNITY=0
+if [ -e /usr/lib/svp_npu/libsvp_acl.so ]; then
+  COMMUNITY=1
+fi
+if [ -r /etc/os-release ] && grep -Eq 'UBUNTU_CODENAME=jammy|VERSION_ID="22.04"' /etc/os-release; then
+  COMMUNITY=1
+fi
+if [ -d /opt/ko/svp_npu ]; then
+  COMMUNITY=0
+fi
 if [ -n "${PICO_RUNTIME_LIB:-}" ]; then
   LIB=$PICO_RUNTIME_LIB
+elif [ "$COMMUNITY" -eq 1 ] && [ -e "$APP_DIR/lib-community/libsvp_acl.so" ]; then
+  LIB=$APP_DIR/lib-community
+elif [ "$COMMUNITY" -eq 1 ]; then
+  echo "chat.sh: community SDK needs $APP_DIR/lib-community (Pegasus ACL)." >&2
+  echo "chat.sh: commercial app/lib fails svp_acl_init ret=100000 on this kernel." >&2
+  echo "chat.sh: set PICO_RUNTIME_LIB to override." >&2
+  exit 2
 elif [ -e "$APP_DIR/lib/libsvp_acl.so" ]; then
   LIB=$APP_DIR/lib
+elif [ -e /usr/lib/svp_npu/libsvp_acl.so ]; then
+  LIB=/usr/lib/svp_npu
 elif [ -e /root/pico_default_smoke/lib/libsvp_acl.so ]; then
   LIB=/root/pico_default_smoke/lib
 elif [ -e /opt/ss928-runtime/lib/libsvp_acl.so ]; then
   LIB=/opt/ss928-runtime/lib
 else
   LIB=$APP_DIR/lib
+fi
+# Community packages keep libsecurec in /usr/lib, not next to libsvp_acl.
+LD_EXTRA=""
+if [ ! -e "$LIB/libsecurec.so" ] && [ -e /usr/lib/libsecurec.so ]; then
+  LD_EXTRA=/usr/lib
+fi
+if command -v pgrep >/dev/null 2>&1 \
+    && pgrep -x Xorg >/dev/null 2>&1 \
+    && [ "${PICO_ALLOW_GRAPHICS:-}" != "1" ]; then
+  if [ "$(id -u)" -eq 0 ] && [ -x "$APP_DIR/prepare_community.sh" ]; then
+    echo "chat.sh: stopping LightDM/Xorg (graphics and inference cannot coexist)" >&2
+    "$APP_DIR/prepare_community.sh"
+  fi
+fi
+if command -v pgrep >/dev/null 2>&1 \
+    && pgrep -x Xorg >/dev/null 2>&1 \
+    && [ "${PICO_ALLOW_GRAPHICS:-}" != "1" ]; then
+  echo "chat.sh: community SDK cannot run graphics and inference together." >&2
+  echo "chat.sh: sudo $APP_DIR/prepare_community.sh   # stops LightDM/Xorg only" >&2
+  echo "chat.sh: do not rmmod gfbg/ot_vo/ot_hdmi — that hangs the kernel." >&2
+  echo "chat.sh: set PICO_ALLOW_GRAPHICS=1 to skip this check." >&2
+  exit 2
 fi
 if [ -n "${PYTHON:-}" ]; then
   PYTHON_BIN=$PYTHON
@@ -105,10 +150,19 @@ if [ -n "$TOKENIZERS" ]; then
   PYTHONPATH_VALUE="$TOKENIZERS:$PYTHONPATH_VALUE"
 fi
 
-exec env LD_LIBRARY_PATH="$LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+EXECUTOR=$APP_DIR/bin/pico_persistent_acl_executor.aarch64
+if [ "$COMMUNITY" -eq 1 ] && [ -x "$APP_DIR/bin/pico_persistent_acl_executor.community" ] \
+    && [ -x "$APP_DIR/glibc239/ld-linux-aarch64.so.1" ]; then
+  EXECUTOR=$APP_DIR/bin/pico_persistent_acl_executor.community
+  if [ -e /usr/lib/svp_npu/libsvp_acl.so ]; then
+    LIB=/usr/lib/svp_npu
+  fi
+fi
+
+exec env LD_LIBRARY_PATH="$LIB${LD_EXTRA:+:$LD_EXTRA}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
   PYTHONPATH="$PYTHONPATH_VALUE${PYTHONPATH:+:$PYTHONPATH}" \
   "$PYTHON_BIN" -u "$APP_DIR/src/merged_board_server.py" \
-    --persistent-executor "$APP_DIR/bin/pico_persistent_acl_executor.aarch64" \
+    --persistent-executor "$EXECUTOR" \
     --profile "$PROFILE" \
     --deployment-root "$ROOT" \
     --library-path "$LIB" \

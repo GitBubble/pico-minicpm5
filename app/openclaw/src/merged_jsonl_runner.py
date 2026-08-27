@@ -18,6 +18,7 @@ from contextlib import redirect_stdout
 from dataclasses import dataclass
 import hashlib
 import importlib.util
+import inspect
 import json
 import math
 from pathlib import Path
@@ -136,20 +137,28 @@ def validate_request(
 class MergedJsonlRunner:
     """Strict protocol facade over one resident merged MiniCPM5 session."""
 
-    def __init__(self, session: NativeSession, limits: RequestLimits) -> None:
+    def __init__(self, session: NativeSession, limits: RequestLimits,
+                 *, reuse_prefix: bool = False) -> None:
         self.session = session
         self.limits = limits
+        self.reuse_prefix = bool(reuse_prefix)
 
     def generate(self, request: Mapping[str, object]) -> dict[str, object]:
         validated = validate_request(request, self.limits)
         eos = set(validated["eos_token_ids"])
         # Replay from position zero for every request.  Every visible resident
         # cache row is overwritten before it becomes unmasked, which is the
-        # merged runtime's reset_kv=true contract.
+        # merged runtime's reset_kv=true contract.  With reuse_prefix the
+        # runtime may skip re-feeding a resident prompt prefix whose tokens
+        # match this request exactly; identical tokens produce identical KV,
+        # so the response stays token-exact and the protocol is unchanged.
+        generate_kwargs: dict[str, object] = {"start": 0}
+        if self.reuse_prefix:
+            generate_kwargs["reuse_prefix"] = True
         with redirect_stdout(sys.stderr):
             reason, output_ids, _steps = self.session.generate(
                 validated["input_ids"], validated["max_new_tokens"], eos,
-                start=0)
+                **generate_kwargs)
         output_ids = list(output_ids)
         if len(output_ids) > validated["max_new_tokens"] \
                 or any(type(token_id) is not int
@@ -305,8 +314,42 @@ def _parse_short_kv_slots(raw: str | None) -> tuple[int, int] | None:
     return slots
 
 
+def _parse_transformer_output_slots(raw: str | None) -> tuple[int, ...] | None:
+    """Parse trusted K,V,hidden output slots the way the board campaign does."""
+    if raw is None:
+        return None
+    try:
+        slots = tuple(int(value) for value in raw.split(","))
+    except ValueError as exc:
+        raise ValueError(
+            "transformer output slots must be comma-separated "
+            "K,V,H integers") from exc
+    if len(slots) != 3 or set(slots) != {0, 1, 2}:
+        raise ValueError(
+            "transformer output slots must be distinct K,V,H indices "
+            "covering 0,1,2")
+    return slots
+
+
+def _accepts_keyword(target: object, parameter: str) -> bool:
+    parameters = inspect.signature(target).parameters
+    if any(value.kind is inspect.Parameter.VAR_KEYWORD
+           for value in parameters.values()):
+        return True
+    found = parameters.get(parameter)
+    return found is not None and found.kind in (
+        inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+
+
 def build_runner(args: argparse.Namespace) -> MergedJsonlRunner:
-    """Load the explicit runtime module and admit one resident model session."""
+    """Load the explicit runtime module and admit one resident model session.
+
+    The always-valid core keyword set is shared by every supported ``Merged``
+    lineage.  Every optional keyword is forwarded only when its CLI flag was
+    given, and only after the loaded runtime's signature proves it is
+    honoured; a flag the runtime cannot honour fails closed by name instead
+    of being silently dropped.
+    """
     limits = RequestLimits(args.context, args.max_new_limit)
     executable = _require_file(args.persistent_executor, "persistent executor")
     decode = _require_file(args.decode_model, "decode model")
@@ -326,31 +369,65 @@ def build_runner(args: argparse.Namespace) -> MergedJsonlRunner:
     short_kv_slots = _parse_short_kv_slots(args.short_kv_slots)
     if short_kv_slots is not None and decode_short is None:
         raise ValueError("--short-kv-slots requires --decode-short-model")
+    output_slots = _parse_transformer_output_slots(
+        args.transformer_output_slots)
     module = _load_runtime_module(args.runtime_module, args.python_path)
+    kwargs: dict[str, object] = {
+        "executable": executable,
+        "decode": decode,
+        "prefill": prefill,
+        "head": head,
+        "library_paths": library_paths,
+        "embedding": embedding,
+        "context": args.context,
+        "timeout": args.timeout,
+        "tokenizer": None,
+        "resident_kv": True,
+    }
+    optional = (
+        ("--decode-short-model", "decode_short",
+         decode_short, decode_short is not None),
+        ("--short-context", "short_context",
+         args.short_context, args.short_context is not None),
+        ("--short-kv-slots", "short_kv_slots",
+         short_kv_slots, short_kv_slots is not None),
+        ("--allow-unsafe-short-context", "allow_unsafe_short_context",
+         True, args.allow_unsafe_short_context),
+        ("--allow-c8192-short-characterization",
+         "allow_c8192_short_characterization",
+         True, args.allow_c8192_short_characterization),
+        ("--executor-uncached", "executor_uncached",
+         True, args.executor_uncached),
+        ("--decode-no-cache", "decode_no_cache",
+         True, args.decode_no_cache),
+        ("--characterize-decode-workspace-zero-once",
+         "characterize_decode_workspace_zero_once",
+         True, args.characterize_decode_workspace_zero_once),
+        ("--prefill-context", "prefill_context",
+         args.prefill_context, args.prefill_context is not None),
+        ("--transformer-output-slots", "transformer_output_slots",
+         output_slots, output_slots is not None),
+    )
+    for flag, parameter, value, given in optional:
+        if not given:
+            continue
+        if not _accepts_keyword(module.Merged, parameter):
+            raise ValueError(
+                f"{flag} is not supported by runtime {args.runtime_module}: "
+                f"Merged() does not accept {parameter!r}")
+        kwargs[parameter] = value
+    if args.reuse_session_kv:
+        generate = getattr(module.Merged, "generate", None)
+        if not callable(generate) \
+                or not _accepts_keyword(generate, "reuse_prefix"):
+            raise ValueError(
+                f"--reuse-session-kv is not supported by runtime "
+                f"{args.runtime_module}: Merged.generate() does not accept "
+                "'reuse_prefix'")
     with redirect_stdout(sys.stderr):
-        session = module.Merged(
-            executable=executable,
-            decode=decode,
-            prefill=prefill,
-            head=head,
-            library_paths=library_paths,
-            embedding=embedding,
-            context=args.context,
-            timeout=args.timeout,
-            tokenizer=None,
-            resident_kv=True,
-            decode_short=decode_short,
-            short_context=args.short_context,
-            short_kv_slots=short_kv_slots,
-            allow_unsafe_short_context=args.allow_unsafe_short_context,
-            allow_c8192_short_characterization=
-            args.allow_c8192_short_characterization,
-            executor_uncached=args.executor_uncached,
-            decode_no_cache=args.decode_no_cache,
-            characterize_decode_workspace_zero_once=
-            args.characterize_decode_workspace_zero_once,
-        )
-    return MergedJsonlRunner(session, limits)
+        session = module.Merged(**kwargs)
+    return MergedJsonlRunner(
+        session, limits, reuse_prefix=args.reuse_session_kv)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -361,7 +438,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--persistent-executor", type=Path, required=True)
     parser.add_argument("--decode-model", type=Path, required=True)
     parser.add_argument("--decode-short-model", type=Path)
-    parser.add_argument("--short-context", type=int, default=128)
+    parser.add_argument("--short-context", type=int)
     parser.add_argument("--short-kv-slots")
     parser.add_argument("--allow-unsafe-short-context", action="store_true")
     parser.add_argument(
@@ -371,6 +448,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--library-path", type=Path, action="append", default=[])
     parser.add_argument("--embedding", type=Path, required=True)
     parser.add_argument("--context", type=int, required=True)
+    parser.add_argument(
+        "--prefill-context", type=int,
+        help="mixed prefill-window contract: boot the long decode window on "
+        "this frozen prefill handle context")
+    parser.add_argument(
+        "--transformer-output-slots", metavar="K,V,H",
+        help="trusted transformer K,V,hidden output slots, e.g. 0,1,2")
+    parser.add_argument(
+        "--reuse-session-kv", action="store_true",
+        help="skip re-feeding a token-exact resident prompt prefix")
     parser.add_argument("--max-new-limit", type=int, default=512)
     parser.add_argument("--timeout", type=float, default=3600.0)
     cache = parser.add_mutually_exclusive_group()

@@ -3,12 +3,12 @@
   "license": "Apache-2.0",
   "files": {
     "src/merged_board_server.py": {
-      "sha256": "75901cff90b1ec5ae3157ef6cef80eebd8914a274c61b6053e71b83b24967967",
+      "sha256": "d08ee422ec27784fc541e2e3947d833f79169f22d61c521823ae57c9fff716b3",
       "diverges_from_monorepo": "a dead sys.path.insert to a board scratch directory was removed for public release; the next line inserts the bundle's own src at higher precedence and supplies all three imports",
       "monorepo_sha256": "8ffebebb7d330afc013501a848bf586778ad4fac3eba5d9cde4aaefac987dada"
     },
     "src/merged_jsonl_runner.py": {
-      "sha256": "1e17f6fecbd9d5458aedf1bccfd64a853ae7bfad5399b6645428f19b51284948"
+      "sha256": "90143ba33387e29431a5d960c46245fa8377d349e933a98d220278979a1bee44"
     },
     "src/pico_minicpm5_split_board_runner.py": {
       "sha256": "8bb1266c89cec85c9f969a1f8fb832e084ab3636221a2c0214b607e10fa85a82"

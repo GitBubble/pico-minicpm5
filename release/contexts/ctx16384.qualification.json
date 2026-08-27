@@ -1,0 +1,179 @@
+{
+  "schema": "pico.minicpm5.context-profile-qualification.v1",
+  "profile": "ctx16384",
+  "target": {
+    "soc": "Hi3403",
+    "npu_arch": "V101",
+    "context": 16384,
+    "prefill_window": 1024
+  },
+  "contract": {
+    "kind": "mixed-prefill-window",
+    "decode": {
+      "deployment_path": "models/ctx16384/decode.om",
+      "bytes": 687131722,
+      "sha256": "a7b60462bfea8a5aeb319c02607a2b814e2c37cbd467be9886a5bb7769097c72"
+    },
+    "prefill": {
+      "deployment_path": "models/prefill.om",
+      "bytes": 686999901,
+      "sha256": "fea09d294513839ccab846050193def475859f4352e2cb3fad7c2f8f1dfa4536"
+    },
+    "head": {
+      "deployment_path": "models/head_flat.om",
+      "bytes": 202651666,
+      "sha256": "fd6675f4aad9d7244471afc637f4964c79a7504b2c73a350985f2d807105330e"
+    }
+  },
+  "numeric_gate": {
+    "cosine_threshold_exclusive": 0.98,
+    "public_outputs": [
+      {
+        "position": 1,
+        "runner": "libinstsim",
+        "next_hidden": 0.9981029868187341,
+        "packed_k": 0.9995758466940526,
+        "packed_v": 0.9982421292261839
+      },
+      {
+        "position": 1,
+        "runner": "board",
+        "next_hidden": 0.9981029868187341,
+        "packed_k": 0.9995758466940526,
+        "packed_v": 0.9982421292261839
+      }
+    ],
+    "minimum_public_output": 0.9981029868187341,
+    "board_tail_byte_exact_position": null
+  },
+  "gates": {
+    "greedy_oracle": {
+      "prompts": 3,
+      "tokens_exact": 48,
+      "tokens_total": 48,
+      "judged_against": "frozen v0.1.0 greedy oracle, the same lineage the ctx8192 record uses",
+      "evidence_file": "evidence/remaining_20260818/oracle3.json",
+      "evidence_sha256": "f3af810e99ce2499b9f70d6194fcc58674f4d2c7477924cbed086bee98332526"
+    },
+    "eos": {
+      "token_sequence_exact": true,
+      "finish_reason": "eos",
+      "judged_against": "fp64 greedy continuation of the pinned checkpoint",
+      "reference": [
+        242,
+        39,
+        220,
+        608,
+        4219,
+        357,
+        242,
+        39,
+        35,
+        1
+      ],
+      "generated": [
+        242,
+        39,
+        220,
+        608,
+        4219,
+        357,
+        242,
+        39,
+        35,
+        1
+      ],
+      "evidence_file": "evidence/candidate_eos_correct.json",
+      "evidence_sha256": "153fd54790d67d20797f38caa642acc4d2678defa107946ad7dccf37121cc0da",
+      "detail": "the candidate run reproduces the strict FP64 reference exactly and stops at EOS; see diagnostics_nonblocking.eos_conflict for two sibling evidence files that diverge on the same prompt"
+    },
+    "context_boundary": {
+      "position": 16384,
+      "rejected_before_model_load": true,
+      "stderr_artifact_bound": true,
+      "exit_code": 2,
+      "evidence_file": "evidence/boundary_16384.stderr.log",
+      "evidence_sha256": "780cf498ceb4a125c3dc9e9116a6f341a388e7a9596056a414ea057c03d8f339"
+    },
+    "board_load": {
+      "decode_descriptor": "7 inputs, 3 outputs",
+      "input_bytes": 402784256,
+      "output_bytes": 73728,
+      "write_ms": 608.1855420052307,
+      "execute_wait_ms": 323.73224999173544,
+      "read_ms": 0.669459011987783,
+      "outputs_byte_exact_with_libinstsim": true,
+      "output_sha256": [
+        "b1f8c12d1486e6cc88f4909b195719032d0733880eab35d5ec0b9c21c5e39d92",
+        "dc1ab4eacfb0a4325491200b7cc1e882c05384f98f01948e76f0308104fafd44",
+        "54152dada72679d9282ce5cec28ea344175872252666ed854d870ba059173521"
+      ],
+      "evidence_file": "evidence/board_execute_p1.json",
+      "evidence_sha256": "e93714a134be62742d706e37fafde3ddc3cc696fc8b429fb10b398a4a80d57ff",
+      "output_evidence_files": "evidence/board_outputs_p1 out.0.bin out.1.bin out.2.bin, hashes as listed above"
+    },
+    "performance": {
+      "generated_step_p50_ms": 242.5075415012543,
+      "tokens_per_second": 4.1235831010015325,
+      "mode": "retain-input unified executor cef4edb2 with retained decode workspace and teacher-forced head skip",
+      "measured": "2026-08-18",
+      "no_retention_generated_step_p50_ms": 305.9844585004612,
+      "no_retention_tokens_per_second": 3.2681398424635764,
+      "evidence_file": "evidence/board_retained_headskip_smoke.json",
+      "evidence_sha256": "106a1e6bdf44aaa7783eb676cc936c1bf0ccb33f9795ddd7485b400e4b67a36b",
+      "ab_evidence_file": "evidence/board_headskip_no_retention_ab.json",
+      "ab_evidence_sha256": "c484633505081bed34e480b9d2d023908dde54e4d353aa3a0297f87899b30f00"
+    },
+    "calibration": {
+      "mode": "source-donor-zero-extend",
+      "source_context": 8192,
+      "native_c16384_calibration": false
+    },
+    "long_prompt_head_skip": {
+      "prompt_tokens": 4097,
+      "head_calls_skipped": 4096,
+      "head_calls_run": 1,
+      "next_token_exact": true,
+      "expected_next_id": 12945,
+      "generated_next_id": 12945,
+      "ingest_seconds": 910.4240159198234,
+      "skipped_step_p50_ms": 222.25208350573666,
+      "evidence_file": "evidence/long4097.json",
+      "evidence_sha256": "f69fc9002ff1e3a0be6175231a6899b1e908ea7a0d43dbe922d6e64c2a68a064",
+      "reference_file": "evidence/long_reference.json",
+      "reference_sha256": "a03e6e0d3b09224b846a1f5c18eaf3ada79a8862dc9b888ff861e8e0635b664a",
+      "detail": "prompt is the first 4097 tokens of the FP64 realctx reference corpus; ingest_seconds is the sum of the 4097 per-step latencies in the evidence file"
+    },
+    "jsonl_service": {
+      "protocol": "pico.minicpm5.runner.v1",
+      "retained_workspace": true,
+      "status": "PASS",
+      "source": "board_jsonl_runner_smoke section of the bound release profile"
+    }
+  },
+  "diagnostics_nonblocking": {
+    "worst_per_layer_slice": {
+      "position": 1,
+      "slice": "layer23-v_cur",
+      "cosine": 0.9962512537770364
+    },
+    "tail_numeric": "no libinstsim or board capture exists at position 16383 anywhere in the evidence pull; the release profile itself lists position-16383 numeric accuracy under not_claimed, so the tail public-output row and the byte-exact tail binding are recorded as absent, never passed",
+    "eos_conflict": "two sibling artifacts in the same evidence pull answer the 1+1 prompt differently: builder_direct_short_all.json (sha256 56c8aabbaa1b90ca15614afa22b0328de0bb048ae1b6e6bc94c08b3c41ed94e6) and the 2026-08-18 rerun remaining_20260818/short_zh_eos.json (sha256 c3cc507972b5e3bbf82a499d233652748502b748f20cb60129d319b491c92c28) diverge from the FP64 reference at the fifth generated token and run to the length cap; the run reports do not embed the decode hash, so the eos PASS is bound to candidate_eos_correct.json as pulled from the released directory, and which build served the 2026-08-18 rerun is an open question",
+    "chinese_oracle": "open, nonblocking: the zh prompt in remaining_20260818/short_zh_eos.json stops at EOS with the answer sentence repeated twice; no strict zh token reference exists",
+    "memory_envelope": "open: no live-memory run is present in the evidence pull; the bound release profile records pre-publication admission as PASS_TIGHT_MMZ_MARGIN with an mmz margin of 100962887 bytes",
+    "greedy_baseline": "the three oracle3 sequences are 48/48 token-identical to the frozen v0.1.0 greedy oracle, and the first six tokens recur identically in both head-skip A/B runs"
+  },
+  "evidence": {
+    "source_record": "c16384 release profile.json (RELEASED_BOARD_VERIFIED, 2026-08-18); per-gate raw run files are named and sha256-bound inline in gates",
+    "source_sha256": "414494c40885bf3506db6f2af1f1cd2b07e4344bb4266a0bd208cb3355b77d28",
+    "location": "read-only pull of the board release directory taken 2026-08-27; OM binaries and raw captures remain owner-held"
+  },
+  "verdict": {
+    "public_output_numeric": "PENDING_TAIL_POSITION_16383",
+    "greedy_exact": "PASS",
+    "eos": "PASS",
+    "context_boundary": "PASS",
+    "board_load": "PASS",
+    "overall": "CANDIDATE_CALIBRATION_NOT_NATIVE"
+  }
+}

@@ -27,16 +27,40 @@ def _profile(name: str) -> dict:
 def test_checked_in_context_records_validate_and_split_verdicts() -> None:
     ctx4096 = context_profiles.validate_record(_record("ctx4096"))
     ctx8192 = context_profiles.validate_record(_record("ctx8192"))
+    ctx16384 = context_profiles.validate_record(_record("ctx16384"))
 
     assert ctx4096["passes"] is True
     assert ctx4096["minimum_public_output"] == 0.9908199813
     assert ctx8192["passes"] is True
     assert ctx8192["overall"] == "PASS"
     assert ctx8192["minimum_public_output"] == 0.9860760661
+    # ctx16384 is a candidate: the calibration is donor-zero-extended from
+    # 8192 and no position-16383 capture exists, so it must not pass.
+    assert ctx16384["passes"] is False
+    assert ctx16384["overall"] == "CANDIDATE_CALIBRATION_NOT_NATIVE"
+    assert ctx16384["minimum_public_output"] == 0.9981029868187341
+
+
+def test_ctx16384_candidate_cannot_claim_numeric_pass_without_tail() -> None:
+    record = _record("ctx16384")
+    assert record["numeric_gate"]["board_tail_byte_exact_position"] is None
+    assert record["verdict"]["public_output_numeric"] != "PASS"
+
+    claimed = copy.deepcopy(record)
+    claimed["verdict"]["public_output_numeric"] = "PASS"
+    with pytest.raises(context_profiles.ContextQualificationError,
+                       match="last valid"):
+        context_profiles.validate_record(claimed)
+
+    tail_bound = copy.deepcopy(record)
+    tail_bound["numeric_gate"]["board_tail_byte_exact_position"] = 16383
+    with pytest.raises(context_profiles.ContextQualificationError,
+                       match="last valid"):
+        context_profiles.validate_record(tail_bound)
 
 
 def test_profile_status_matches_context_record_verdict() -> None:
-    for name in ("ctx4096", "ctx8192"):
+    for name in ("ctx4096", "ctx8192", "ctx16384"):
         profile = _profile(name)
         summary = context_profiles.validate_record(_record(name))
         expected = "qualified" if summary["passes"] else "pending"
@@ -47,7 +71,7 @@ def test_profile_status_matches_context_record_verdict() -> None:
 
 def test_records_bind_frozen_v010_prefill_and_head_and_profile_paths() -> None:
     artifacts = json.loads(MANIFEST.read_text(encoding="utf-8"))["artifacts"]
-    for name in ("ctx4096", "ctx8192"):
+    for name in ("ctx4096", "ctx8192", "ctx16384"):
         record = _record(name)
         profile = _profile(name)
         contract = record["contract"]
@@ -122,3 +146,9 @@ def test_cli_verifies_context_records(capsys) -> None:
         "qualify-context-profile", "--record",
         str(CONTEXTS / "ctx8192.qualification.json")]) == 0
     assert json.loads(capsys.readouterr().out)["passes"] is True
+    # The candidate record validates but does not pass, so the CLI
+    # exits non-zero and cannot be mistaken for a qualification.
+    assert cli.main([
+        "qualify-context-profile", "--record",
+        str(CONTEXTS / "ctx16384.qualification.json")]) == 1
+    assert json.loads(capsys.readouterr().out)["passes"] is False

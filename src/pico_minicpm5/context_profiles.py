@@ -13,6 +13,13 @@ release.
 A profile in ``app/profiles`` may declare ``status: qualified`` for an
 extended context only when the matching record in ``release/contexts``
 passes this gate with ``verdict.overall == "PASS"``.
+
+A candidate record whose tail-position capture does not exist yet may
+set ``board_tail_byte_exact_position`` to ``null`` and omit the
+``context - 1`` public-output row, but then it must not claim
+``verdict.public_output_numeric == "PASS"`` (and therefore can never
+reach ``overall == "PASS"``): the tail requirement stays fail-closed
+for every qualification claim.
 """
 from __future__ import annotations
 
@@ -142,16 +149,26 @@ def validate_record(record: dict) -> dict:
         for metric in ("next_hidden", "packed_k", "packed_v"):
             observed.append(
                 _cosine(row[metric], f"{label}.{metric}", threshold))
-    _require({1, context - 1} <= seen_positions,
-             "public outputs must cover position 1 and the last valid "
-             "position (context - 1)")
+    tail = gate["board_tail_byte_exact_position"]
+    claims_numeric_pass = (
+        isinstance(record.get("verdict"), dict)
+        and record["verdict"].get("public_output_numeric") == "PASS")
+    if claims_numeric_pass or tail is not None:
+        _require({1, context - 1} <= seen_positions,
+                 "public outputs must cover position 1 and the last valid "
+                 "position (context - 1)")
+        _require(tail == context - 1,
+                 "board tail byte-exact evidence must sit at context - 1")
+    else:
+        # Candidate record with the tail capture recorded as absent:
+        # position-1 coverage is still mandatory, and the numeric gate
+        # verdict above is barred from claiming PASS.
+        _require(1 in seen_positions,
+                 "public outputs must cover position 1")
     minimum = _cosine(
         gate["minimum_public_output"], "minimum_public_output", threshold)
     _require(minimum == min(observed),
              "minimum_public_output must equal the smallest reported cosine")
-    tail = gate["board_tail_byte_exact_position"]
-    _require(tail == context - 1,
-             "board tail byte-exact evidence must sit at context - 1")
 
     verdict = record["verdict"]
     _exact_keys(verdict, set(_GATE_VERDICTS) | {"overall"}, "verdict")

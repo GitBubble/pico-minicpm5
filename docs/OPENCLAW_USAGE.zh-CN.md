@@ -19,7 +19,8 @@
 |---|---|---|
 | `ctx1024` 三句柄 + `chat.sh` | 已发布 | 原生文字对话，不经过 OpenClaw。 |
 | C4096 split-runner + OpenAI 兼容服务 + OpenClaw 文字模式 | 开发预览 | 存在明确 JSONL handoff，但 runner 仍标记 `production_ready: false`。 |
-| C8192 native OM + OpenAI/OpenClaw | 未闭环 | C8192 OM 已有独立数值证据，但 native OM → JSONL service → OpenClaw 尚未实现和验证。 |
+| C8192 native OM + OpenAI service + OpenClaw 文字/Agent | **已闭环（2026-08-27 板端）** | native OM → JSONL runner → `/v1/chat/completions`（非流式、SSE、HTTP 层工具往返）→ OpenClaw 2026.7.1 `infer`（逐字 `pong`）与 `agent --local`（真实中文回答）全链在板上通过；契约超时须为 1800 s。 |
+| C16384 native OM + OpenAI service + OpenClaw 文字/Agent | **已闭环（2026-08-27 板端）** | 同一链路在 `RELEASED_BOARD_VERIFIED` 的 ctx16384 decode OM 上通过同组门禁；验收记录 `release/contexts/ctx16384.qualification.json`（候选：donor 零扩展标定）。 |
 | 官方 Hugging Face MiniCPM5-1B + Host OpenClaw 工具调用 | 已验证 | 完成过真实工具执行、结果回灌和最终答案闭环，但不是 Hi3403 native OM 证据。 |
 | Hi3403 上运行 OpenClaw + Host HF backend | 实验性 | 工具调用识别、一次内建工具执行和结果回灌已出现；`ENOMEM` 和重复工具循环阻断最终闭环。 |
 | Hi3403 native OM + OpenClaw 工具调用 | 未执行 | 当前没有 native OM 工具调用资格证据。 |
@@ -399,7 +400,8 @@ python3 "$GENERATOR" \
 - 该 Host 证据不等于 Hi3403 native OM 工具资格；
 - Hi3403 上 OpenClaw 2026.7.1 连接 Host HF backend 时，能识别工具调用，也完成过内建工具执行和结果回灌；这不是 native OM 证据；
 - 但 `exec` 子进程曾因 `ENOMEM` 失败，minimal meta-tool 路径也出现过重复调用直至上下文溢出；
-- native C8192 OM 到 OpenClaw 的完整工具闭环尚未发布通过。
+- native OM 的文字/Agent 闭环已在 ctx8192 与 ctx16384 上于 2026-08-27 板端通过（见上表）。service 层的工具往返（模型发出 `calculate` 调用、结果回灌、最终精确答案）在两个档位的 HTTP 直连下均已验证；
+- 但经 OpenClaw 自身工具提示面的调用仍未收敛：1B 模型面对 OpenClaw 的 meta-tool 提示会原样复读指令或回答 `NO_REPLY`，不发出调用。OpenClaw 工具闭环对 1B 模型仍不成立，此前的结论维持不变。
 
 生成器的工具配置会关闭 `strictMessageKeys` 以保留 `assistant.tool_calls` 和 `tool.tool_call_id`。同时，当前板端配置的 sandbox 是关闭状态；向不可信输入开放 `exec` 会允许模型在 OpenClaw 所在机器执行命令，风险很高。
 

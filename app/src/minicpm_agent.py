@@ -334,6 +334,16 @@ def _unsafe_for_direct_route(lowered: str) -> bool:
             or _has_term(lowered, _BROAD_WORK))
 # Something a workspace tool can actually reach. A transformation such as
 # 总结/explain implies a tool only once the turn names one of these.
+#: Turns that want the vision model. These are separate from the filesystem
+#: read group on purpose: "看看这张图" and "看看这个目录" share a verb, and
+#: routing on the verb alone would send a directory listing to the NPU.
+_VISION_INTENT = (
+    "图", "图片", "图像", "照片", "画面", "截图", "看图", "识图",
+    "image", "picture", "photo", "screenshot", "diagram", "chart",
+)
+#: File extensions the vision model can actually open.
+_IMAGE_SUFFIX = (".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif")
+
 _WORKSPACE_NOUN = (
     "文件", "文件夹", "目录", "路径", "工作区", "仓库", "分支", "提交", "代码",
     "项目", "脚本", "日志", "配置", "file", "files", "folder", "directory",
@@ -1046,6 +1056,7 @@ class WorkspaceTools:
     _PROFILES = {
         "none": (),
         "calculate": ("calculate",),
+        "vision": ("describe_image",),
         "result_page": ("read_result_page",),
         "write": _WRITE_SET,
         "write+calc": (*_MUTATION_BASE, "calculate", "write_file"),
@@ -1066,13 +1077,21 @@ class WorkspaceTools:
         "search_text": "search_matches",
         "git_status": "git_status",
         "calculate": "number",
+        "describe_image": "vision_job",
         "write_file": "write_receipt",
         "run_shell": "shell_output",
     }
     _MAX_RESULTS = 16
     _MAX_STORED_RESULT_CHARS = 65_536
 
-    def __init__(self, root: Path, *, max_output_chars: int = MAX_TOOL_OUTPUT_CHARS):
+    def __init__(self, root: Path, *,
+                 max_output_chars: int = MAX_TOOL_OUTPUT_CHARS,
+                 vision_queue=None):
+        # The vision model runs in its own process behind a job queue: this
+        # model cannot hold both sets of NPU handles, and an image takes long
+        # enough that answering it inline would stop the conversation. When no
+        # queue is configured the tool is simply not disclosed.
+        self.vision_queue = vision_queue
         self.root = root.expanduser().resolve()
         if not self.root.is_dir():
             raise ValueError(f"agent workspace is not a directory: {self.root}")
@@ -1125,6 +1144,14 @@ class WorkspaceTools:
                         "max_chars": {"type": "integer", "default": 800}},
                     "required": ["ref"],
                 }, self._read_result_page),
+                Tool("describe_image", (
+                    "Ask the vision model about an image file. Returns a job "
+                    "id at once; the description arrives on a later turn."), {
+                    **obj, "properties": {
+                        "path": {"type": "string"},
+                        "question": {"type": "string"}},
+                    "required": ["path"],
+                }, self._describe_image),
                 Tool("calculate", (
                     "Evaluate arithmetic exactly. Use it for any decimal, "
                     "power, root, log or activation value instead of computing "
@@ -1181,8 +1208,20 @@ class WorkspaceTools:
             and _NAMED_EXTENSION.search(candidate) is not None
 
     @classmethod
+    def _image_reference(cls, text: str, lowered: str) -> bool:
+        """Whether the turn names something the vision model could open.
+
+        A verb alone is not enough. "看看这张图" with no file named is a
+        request this deployment cannot serve, and routing it to the vision
+        tool would spend an NPU load to fail; it stays with the language
+        model, which can ask which file is meant.
+        """
+        return any(suffix in lowered for suffix in _IMAGE_SUFFIX)
+
+    @classmethod
     def select_schema_profile(
         cls, user_text: str, *, has_context: bool = False,
+        has_vision: bool = False,
     ) -> str:
         """Disclose the narrowest tool set this turn gives evidence for.
 
@@ -1207,6 +1246,14 @@ class WorkspaceTools:
         # set as well only when it also asks to look at something: the file
         # named in "save it as pi.py" is the write target, not a referent to
         # be read, so the referent rule must not widen this branch.
+        # Vision is disclosed only where a worker exists to serve it. On a
+        # deployment without one the tool could only ever be called and
+        # refused, and the schema would still be charged in prefill tokens on
+        # every image-shaped turn, so the request falls through to the read
+        # set instead -- which can at least say what the file is.
+        if has_vision and _has_term(lowered, _VISION_INTENT) \
+                and cls._image_reference(text, lowered):
+            return "vision"
         also_reads = _has_term(lowered, _READ_INTENT)
         calc = cls._MATH_SUFFIX if _dispatched_math(text, lowered) else ""
         if needs_write and needs_shell:
@@ -1472,6 +1519,26 @@ class WorkspaceTools:
 
     def _current_directory(self, _arguments: dict[str, str]) -> str:
         return str(self.root)
+
+    def _describe_image(self, arguments: dict[str, str]) -> str:
+        """Post the image to the vision model and return without waiting.
+
+        The answer is not available in this turn by design: the vision model
+        holds its own NPU handles in another process, and blocking here would
+        stop the conversation for as long as an image takes. The REPL reports
+        the description when it lands.
+        """
+        if self.vision_queue is None:
+            raise ToolExecutionError(
+                "no vision worker is configured for this deployment")
+        path = self._path(arguments.get("path", ""))
+        question = str(arguments.get("question") or "描述这张图片。").strip()
+        try:
+            job = self.vision_queue.submit(path, question)
+        except ValueError as error:
+            raise ToolExecutionError(str(error)) from error
+        return (f"job {job.job_id} queued for the vision model; "
+                f"the description will arrive shortly")
 
     def _calculate(self, arguments: dict[str, str]) -> str:
         # One canonical line, so the first line of this result is already the

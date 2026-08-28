@@ -48,6 +48,7 @@ import probe_om_execute_latency as probe  # noqa: E402
 import minicpm_agent as agent  # noqa: E402
 import minicpm_profile as profile_contract  # noqa: E402
 import context_ledger as ledger  # noqa: E402
+import vision_jobs  # noqa: E402
 import minicpm_prefill_schedule as prefill_schedule  # noqa: E402
 import minicpm_prefill_runtime as prefill_runtime_contract  # noqa: E402
 import eager_prefill  # noqa: E402
@@ -117,6 +118,42 @@ def parse_transformer_output_slots(value):
         raise argparse.ArgumentTypeError(
             "output slots must be distinct K,V,H indices covering 0,1,2")
     return slots
+
+
+def report_vision(queue, ui, messages):
+    """Surface vision work that finished while the agent was busy.
+
+    ``describe_image`` posts a job and returns at once, so the answer is not
+    available on the turn that asked for it. Draining the queue here is what
+    makes the two models visibly concurrent: the description of an image lands
+    between turns of a conversation the language model never stopped holding.
+
+    The answer is also appended to the transcript as a system block so a
+    follow-up question about the picture has something to read. Collecting is
+    a rename, so an answer is shown exactly once even across a restart.
+    """
+    if queue is None:
+        return []
+    try:
+        finished = queue.collect()
+    except Exception as error:                                   # noqa: BLE001
+        # A broken queue must not take a conversation down with it.
+        ui.info(f"vision queue unreadable: {error}")
+        return []
+    for job in finished:
+        if job.state == "done":
+            elapsed = f" ({job.elapsed_seconds:.1f}s)" \
+                if job.elapsed_seconds is not None else ""
+            ui.info(f"vision · {Path(job.image_path).name}{elapsed}: "
+                    f"{job.answer}")
+            messages.append({
+                "role": "system",
+                "content": (f"视觉模型对 {Path(job.image_path).name} 的回答"
+                            f"（问题：{job.question}）：{job.answer}")})
+        else:
+            ui.info(f"vision · {Path(job.image_path).name} failed: "
+                    f"{job.error}")
+    return finished
 
 
 def agent_command_help(topic, *, context, max_new, thinking, max_tool_steps,
@@ -1723,6 +1760,11 @@ def main() -> int:
         "--workspace", type=Path, default=Path.cwd(),
         help="filesystem boundary for agent tools (default: current directory)")
     ap.add_argument(
+        "--vision-queue", type=Path,
+        help="job directory shared with a vision_worker process; enables the "
+             "describe_image tool, which posts an image to the vision model "
+             "and returns at once instead of blocking this REPL")
+    ap.add_argument(
         "--max-tool-steps", type=int,
         help="maximum model/tool rounds per user turn")
     ap.add_argument("--max-new", type=int)
@@ -1974,8 +2016,15 @@ def main() -> int:
         if args.agent:
             tool_output_limit = runtime_profile.max_tool_output_chars \
                 if runtime_profile else agent.MAX_TOOL_OUTPUT_CHARS
+            # The vision model runs behind a job queue in its own process.
+            # Without --vision-queue the tool is never disclosed, so a board
+            # with no vision worker spends no prompt tokens on it.
+            vision_queue = None
+            if args.vision_queue is not None:
+                vision_queue = vision_jobs.VisionQueue(args.vision_queue)
             workspace_tools = agent.WorkspaceTools(
-                args.workspace, max_output_chars=tool_output_limit)
+                args.workspace, max_output_chars=tool_output_limit,
+                vision_queue=vision_queue)
             # The system prompt is disclosed with the tools, not beside them.
             # Tool discipline is unreadable advice on a turn that discloses no
             # tools, and it is not free: the paragraph below is 124 of the 136
@@ -2176,13 +2225,17 @@ def main() -> int:
                     ui.info(f"max-new={repl_max_new}")
                     continue
 
+                # Anything the vision model finished while the user was
+                # typing joins the transcript before this turn is planned.
+                report_vision(vision_queue, ui, messages)
                 turn_started = time.perf_counter()
                 previous_assistant = next((
                     str(message.get("content", ""))
                     for message in reversed(messages)
                     if message.get("role") == "assistant"), "")
                 active_schema_profile = workspace_tools.select_schema_profile(
-                    spec, has_context=bool(previous_assistant))
+                    spec, has_context=bool(previous_assistant),
+                    has_vision=vision_queue is not None)
                 messages.append({"role": "user", "content": spec})
                 route_started = time.perf_counter()
                 route_decision = agent.route_obvious_read_only(
@@ -2497,6 +2550,7 @@ def main() -> int:
                                 "final text.")
                         ui.turn_summary(len(out), generated_steps, reason)
                         messages.append({"role": "assistant", "content": final_text})
+                        report_vision(vision_queue, ui, messages)
                         try:
                             ui.context_summary(agent_ledger())
                         except Exception:

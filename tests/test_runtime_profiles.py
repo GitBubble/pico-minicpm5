@@ -42,7 +42,9 @@ def test_builtin_profile_matrix_and_limits(tmp_path: Path) -> None:
     assert loaded["ctx4096"].status == "qualified"
     assert loaded["ctx8192"].status == "qualified"
     assert loaded["ctx10240"].status == "pending"
-    assert loaded["ctx16384"].status == "pending"
+    # Qualified 2026-08-27: release/contexts/ctx16384.qualification.json
+    # passes with overall PASS on the 2026-08-19 probrenorm-ranked build.
+    assert loaded["ctx16384"].status == "qualified"
     assert loaded["ctx4096"].max_new_limit == 512
     assert loaded["ctx8192"].max_new_limit == 1024
     assert loaded["ctx10240"].max_new_limit == 1024
@@ -73,12 +75,16 @@ def test_ctx128_agent_fails_before_pending_status() -> None:
 
 def test_pending_long_context_needs_explicit_development_override() -> None:
     profiles = _module()
-    for name in ("ctx10240", "ctx16384"):
-        profile = profiles.load_runtime_profile(name, PROFILES)
-        with pytest.raises(profiles.ProfileError,
-                           match="allow-unqualified-profile"):
-            profile.require_mode("agent")
-        profile.require_mode("agent", allow_unqualified=True)
+    profile = profiles.load_runtime_profile("ctx10240", PROFILES)
+    with pytest.raises(profiles.ProfileError,
+                       match="allow-unqualified-profile"):
+        profile.require_mode("agent")
+    profile.require_mode("agent", allow_unqualified=True)
+
+
+def test_qualified_ctx16384_needs_no_override() -> None:
+    profiles = _module()
+    profiles.load_runtime_profile("ctx16384", PROFILES).require_mode("agent")
 
 
 def test_qualified_ctx8192_needs_no_override() -> None:

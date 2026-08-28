@@ -34,25 +34,47 @@ def test_checked_in_context_records_validate_and_split_verdicts() -> None:
     assert ctx8192["passes"] is True
     assert ctx8192["overall"] == "PASS"
     assert ctx8192["minimum_public_output"] == 0.9860760661
-    # ctx16384 is a candidate: the calibration is donor-zero-extended from
-    # 8192 and no position-16383 capture exists, so it must not pass.
-    assert ctx16384["passes"] is False
-    assert ctx16384["overall"] == "CANDIDATE_CALIBRATION_NOT_NATIVE"
-    assert ctx16384["minimum_public_output"] == 0.9981029868187341
+    # ctx16384 passes on the 2026-08-19 probrenorm-ranked build: the tail
+    # at 16383 is covered on both runners, and the independently recomputed
+    # libinstsim row matches the acceptance's board trio digit for digit.
+    # The donor-zero-extended calibration stays recorded as nonblocking,
+    # exactly as it is for ctx8192.
+    assert ctx16384["passes"] is True
+    assert ctx16384["overall"] == "PASS"
+    assert ctx16384["minimum_public_output"] == 0.9828345378
 
 
-def test_ctx16384_candidate_cannot_claim_numeric_pass_without_tail() -> None:
+def test_a_candidate_cannot_claim_numeric_pass_without_tail() -> None:
+    """The fail-closed tail rule, proven on a candidate derived from the
+    shipped PASS record by removing its tail evidence."""
     record = _record("ctx16384")
-    assert record["numeric_gate"]["board_tail_byte_exact_position"] is None
-    assert record["verdict"]["public_output_numeric"] != "PASS"
+    assert record["verdict"]["overall"] == "PASS"
 
-    claimed = copy.deepcopy(record)
-    claimed["verdict"]["public_output_numeric"] = "PASS"
+    candidate = copy.deepcopy(record)
+    candidate["numeric_gate"]["board_tail_byte_exact_position"] = None
+    candidate["numeric_gate"]["public_outputs"] = [
+        row for row in candidate["numeric_gate"]["public_outputs"]
+        if row["position"] == 1]
+    candidate["numeric_gate"]["minimum_public_output"] = min(
+        value for row in candidate["numeric_gate"]["public_outputs"]
+        for key, value in row.items()
+        if key in ("next_hidden", "packed_k", "packed_v"))
+
+    # Claiming numeric PASS without the tail row must fail closed.
     with pytest.raises(context_profiles.ContextQualificationError,
                        match="last valid"):
-        context_profiles.validate_record(claimed)
+        context_profiles.validate_record(candidate)
 
-    tail_bound = copy.deepcopy(record)
+    # Admitting the gap is valid -- but then overall PASS is unreachable.
+    candidate["verdict"]["public_output_numeric"] = "PENDING_TAIL"
+    with pytest.raises(context_profiles.ContextQualificationError,
+                       match="overall PASS requires every gate PASS"):
+        context_profiles.validate_record(candidate)
+    candidate["verdict"]["overall"] = "CANDIDATE_TAIL_PENDING"
+    context_profiles.validate_record(candidate)
+
+    # Binding the tail position without the context-1 row also fails.
+    tail_bound = copy.deepcopy(candidate)
     tail_bound["numeric_gate"]["board_tail_byte_exact_position"] = 16383
     with pytest.raises(context_profiles.ContextQualificationError,
                        match="last valid"):
@@ -146,9 +168,7 @@ def test_cli_verifies_context_records(capsys) -> None:
         "qualify-context-profile", "--record",
         str(CONTEXTS / "ctx8192.qualification.json")]) == 0
     assert json.loads(capsys.readouterr().out)["passes"] is True
-    # The candidate record validates but does not pass, so the CLI
-    # exits non-zero and cannot be mistaken for a qualification.
     assert cli.main([
         "qualify-context-profile", "--record",
-        str(CONTEXTS / "ctx16384.qualification.json")]) == 1
-    assert json.loads(capsys.readouterr().out)["passes"] is False
+        str(CONTEXTS / "ctx16384.qualification.json")]) == 0
+    assert json.loads(capsys.readouterr().out)["passes"] is True

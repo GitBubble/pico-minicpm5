@@ -1,7 +1,7 @@
 {
   "schema": "pico.minicpm5.runtime-profile.v2",
   "name": "ctx16384",
-  "status": "pending",
+  "status": "qualified",
   "context": {
     "capacity": 16384,
     "past_length": 16383,

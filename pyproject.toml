@@ -25,6 +25,9 @@ hub = ["huggingface_hub>=0.34"]
 onnx = ["numpy>=1.24", "onnx>=1.16", "safetensors>=0.4"]
 reference = ["numpy>=1.24", "torch>=2.2", "transformers>=4.48", "safetensors>=0.4"]
 dev = ["build>=1.2", "pytest>=8", "ruff>=0.6"]
+# tests/test_openclaw_openai_service.py tokenizer-bound cases; point
+# PICO_HOME at a deployment holding assets/tokenizer.json to unskip.
+service-test = ["tokenizers>=0.22", "jinja2>=3.1"]
 
 [project.scripts]
 pico-minicpm5 = "pico_minicpm5.cli:main"

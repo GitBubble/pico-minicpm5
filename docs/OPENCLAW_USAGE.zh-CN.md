@@ -20,7 +20,7 @@
 | `ctx1024` 三句柄 + `chat.sh` | 已发布 | 原生文字对话，不经过 OpenClaw。 |
 | C4096 split-runner + OpenAI 兼容服务 + OpenClaw 文字模式 | 开发预览 | 存在明确 JSONL handoff，但 runner 仍标记 `production_ready: false`。 |
 | C8192 native OM + OpenAI service + OpenClaw 文字/Agent | **已闭环（2026-08-27 板端）** | native OM → JSONL runner → `/v1/chat/completions`（非流式、SSE、HTTP 层工具往返）→ OpenClaw 2026.7.1 `infer`（逐字 `pong`）与 `agent --local`（真实中文回答）全链在板上通过；契约超时须为 1800 s。 |
-| C16384 native OM + OpenAI service + OpenClaw 文字/Agent | **已闭环（2026-08-27 板端）** | 同一链路在 `RELEASED_BOARD_VERIFIED` 的 ctx16384 decode OM 上通过同组门禁；验收记录 `release/contexts/ctx16384.qualification.json`（候选：donor 零扩展标定）。 |
+| C16384 native OM + OpenAI service + OpenClaw 文字/Agent | **已闭环（2026-08-27 板端）** | 同一链路在 `RELEASED_BOARD_VERIFIED` 的 ctx16384 decode OM 上通过同组门禁；验收记录 `release/contexts/ctx16384.qualification.json`（overall PASS，2026-08-19 probrenorm 构建；16383 尾位双 runner 覆盖，libinstsim 独立复算与板端三元组逐位一致；donor 零扩展标定作为非阻塞事项记录）。 |
 | 官方 Hugging Face MiniCPM5-1B + Host OpenClaw 工具调用 | 已验证 | 完成过真实工具执行、结果回灌和最终答案闭环，但不是 Hi3403 native OM 证据。 |
 | Hi3403 上运行 OpenClaw + Host HF backend | 实验性 | 工具调用识别、一次内建工具执行和结果回灌已出现；`ENOMEM` 和重复工具循环阻断最终闭环。 |
 | Hi3403 native OM + OpenClaw 工具调用 | 未执行 | 当前没有 native OM 工具调用资格证据。 |
@@ -401,7 +401,7 @@ python3 "$GENERATOR" \
 - Hi3403 上 OpenClaw 2026.7.1 连接 Host HF backend 时，能识别工具调用，也完成过内建工具执行和结果回灌；这不是 native OM 证据；
 - 但 `exec` 子进程曾因 `ENOMEM` 失败，minimal meta-tool 路径也出现过重复调用直至上下文溢出；
 - native OM 的文字/Agent 闭环已在 ctx8192 与 ctx16384 上于 2026-08-27 板端通过（见上表）。service 层的工具往返（模型发出 `calculate` 调用、结果回灌、最终精确答案）在两个档位的 HTTP 直连下均已验证；
-- 但经 OpenClaw 自身工具提示面的调用仍未收敛：1B 模型面对 OpenClaw 的 meta-tool 提示会原样复读指令或回答 `NO_REPLY`，不发出调用。OpenClaw 工具闭环对 1B 模型仍不成立，此前的结论维持不变。
+- OpenClaw 自身的工具环也已于 2026-08-27 在板上闭合一次：英文直令 “Call the session_status tool now.” 下，模型发出 `session_status` 调用、OpenClaw 执行内建工具、结果回灌、模型给出总结收尾。**该路径对措辞敏感**：等价的中文指令（「请调用 session_status 工具」）会被模型原样复读而不发出调用，echo 类提示词（「只回复 X」）会触发 `NO_REPLY`。工具环可用但不稳健，正式文档不应宣传为已收敛。
 
 生成器的工具配置会关闭 `strictMessageKeys` 以保留 `assistant.tool_calls` 和 `tool.tool_call_id`。同时，当前板端配置的 sandbox 是关闭状态；向不可信输入开放 `exec` 会允许模型在 OpenClaw 所在机器执行命令，风险很高。
 

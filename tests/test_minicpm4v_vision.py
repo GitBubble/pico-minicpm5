@@ -236,6 +236,57 @@ def test_prefill_truncates_the_question_at_the_template_budget(tmp_path) -> None
     embeddings.close()
 
 
+def test_a_continuation_is_appended_after_the_closing_template(
+        tmp_path) -> None:
+    """Generation here is re-prefill, so the answer so far rides in the window."""
+    vision = _vision()
+    embeddings, data = _row_table(
+        tmp_path, "emb.bin", vision.TOTAL_TOKEN_NUM, vision.EMB_DIM, vision)
+    vocab = vision.VocabTable({"a": 5, "b": 6})
+    tokens = np.zeros((vision.VISION_TOKEN_LEN, vision.EMB_DIM), np.float32)
+
+    built = vision.build_prefill_inputs(tokens, "ab", vocab, embeddings,
+                                        [11, 12, 13])
+
+    assert built.prefill_len == 9 + 64 + 3 + 2 + 6 + 3
+    window = built.inputs_embeds[0]
+    assert np.array_equal(window[84:87], data[[11, 12, 13]])
+    assert not window[built.prefill_len:].any()
+    # The mask has to grow with the continuation or the newest token is
+    # generated from a position the model cannot attend to.
+    assert built.attention_mask.shape == (1, 1, 200, 200)
+    embeddings.close()
+
+
+def test_an_empty_continuation_is_the_plain_prompt(tmp_path) -> None:
+    vision = _vision()
+    embeddings, _ = _row_table(
+        tmp_path, "emb.bin", vision.TOTAL_TOKEN_NUM, vision.EMB_DIM, vision)
+    vocab = vision.VocabTable({"a": 5})
+    tokens = np.zeros((vision.VISION_TOKEN_LEN, vision.EMB_DIM), np.float32)
+
+    plain = vision.build_prefill_inputs(tokens, "a", vocab, embeddings)
+    empty = vision.build_prefill_inputs(tokens, "a", vocab, embeddings, [])
+
+    assert plain.prefill_len == empty.prefill_len
+    assert np.array_equal(plain.inputs_embeds, empty.inputs_embeds)
+    embeddings.close()
+
+
+def test_a_continuation_that_overflows_the_window_is_refused(tmp_path) -> None:
+    """Silently truncating would drop the newest token and loop forever."""
+    vision = _vision()
+    embeddings, _ = _row_table(
+        tmp_path, "emb.bin", vision.TOTAL_TOKEN_NUM, vision.EMB_DIM, vision)
+    vocab = vision.VocabTable({"a": 5})
+    tokens = np.zeros((vision.VISION_TOKEN_LEN, vision.EMB_DIM), np.float32)
+
+    with pytest.raises(vision.VisionError, match="200 rows"):
+        vision.build_prefill_inputs(tokens, "a", vocab, embeddings,
+                                    list(range(200)))
+    embeddings.close()
+
+
 def test_prefill_refuses_a_resample_output_of_the_wrong_size(tmp_path) -> None:
     vision = _vision()
     embeddings, _ = _row_table(

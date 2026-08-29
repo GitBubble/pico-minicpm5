@@ -53,6 +53,11 @@ class Job:
     answer: str | None = None
     error: str | None = None
     elapsed_seconds: float | None = None
+    #: Text generated so far, rewritten as the worker produces it. A reader
+    #: polling a claimed job sees the answer arrive rather than one silent
+    #: pause followed by a paragraph.
+    partial: str | None = None
+    tokens: int | None = None
 
     def record(self) -> dict:
         payload = {
@@ -64,7 +69,7 @@ class Job:
             "created": self.created,
         }
         for name in ("claimed", "finished", "answer", "error",
-                     "elapsed_seconds"):
+                     "elapsed_seconds", "partial", "tokens"):
             value = getattr(self, name)
             if value is not None:
                 payload[name] = value
@@ -156,9 +161,26 @@ class VisionQueue:
             return claimed
         return None
 
+    def progress(self, job: Job, partial: str, tokens: int) -> Job:
+        """Publish what has been generated so far, without finishing.
+
+        Called once per generated token. The record stays ``claimed``, so
+        :meth:`collect` still ignores it -- this is a live view for whoever
+        is watching, not a delivery.
+        """
+        moving = Job(**{**job.__dict__, "partial": str(partial),
+                        "tokens": int(tokens)})
+        self._write(moving)
+        return moving
+
+    def watching(self) -> list[Job]:
+        """Claimed jobs, for a caller that wants to show work in flight."""
+        return self.list("claimed")
+
     def finish(self, job: Job, answer: str, elapsed: float) -> Job:
         done = Job(**{**job.__dict__, "state": "done", "finished": _now(),
                       "answer": str(answer)[:MAX_ANSWER_CHARS],
+                      "partial": None,
                       "elapsed_seconds": round(float(elapsed), 2)})
         self._write(done)
         self._path(job.job_id, "claimed").unlink(missing_ok=True)

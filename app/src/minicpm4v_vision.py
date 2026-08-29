@@ -22,6 +22,7 @@ seeking rather than loaded.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -244,14 +245,21 @@ class PrefillInputs:
 
 
 def build_prefill_inputs(vision_tokens: np.ndarray, text: str,
-                         vocab: VocabTable,
-                         embeddings: RowTable) -> PrefillInputs:
+                         vocab: VocabTable, embeddings: RowTable,
+                         continuation: Sequence[int] = ()) -> PrefillInputs:
     """Assemble the 200-token window: template, image, template, text, template.
 
     The layout is fixed by the reference: nine ids opening the user turn and
     the image, sixty-four vision tokens copied verbatim from the resampler,
     three ids closing the image, the question truncated to 118 ids, and six
     ids that close the turn and open the assistant's.
+
+    ``continuation`` appends tokens the model has already produced, which is
+    how this deployment generates at all: ``decode.om`` declares more ports
+    than the SDK will load, so each new token is taken from the logits of a
+    fresh prefill over the prompt plus everything said so far. The window is
+    200 rows and a question is short, so there is normally room for a hundred
+    tokens of answer; a caller that fills it is told rather than truncated.
     """
     if vision_tokens.size != VISION_TOKEN_LEN * EMB_DIM:
         raise VisionError(
@@ -265,10 +273,16 @@ def build_prefill_inputs(vision_tokens: np.ndarray, text: str,
     window[cursor:cursor + VISION_TOKEN_LEN] = vision_tokens.reshape(
         VISION_TOKEN_LEN, EMB_DIM)
     cursor += VISION_TOKEN_LEN
-    for group in (MID_TEMPLATE, tuple(text_ids), POST_TEMPLATE):
-        if group:
-            window[cursor:cursor + len(group)] = embeddings.gather(group)
-            cursor += len(group)
+    for group in (MID_TEMPLATE, tuple(text_ids), POST_TEMPLATE,
+                  tuple(int(token) for token in continuation)):
+        if not group:
+            continue
+        if cursor + len(group) > TOTAL_PREFILL_LEN:
+            raise VisionError(
+                f"prefill window holds {TOTAL_PREFILL_LEN} rows; "
+                f"{cursor + len(group)} were assembled")
+        window[cursor:cursor + len(group)] = embeddings.gather(group)
+        cursor += len(group)
 
     return PrefillInputs(
         inputs_embeds=window.reshape(1, TOTAL_PREFILL_LEN, EMB_DIM),

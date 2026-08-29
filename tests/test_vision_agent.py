@@ -248,3 +248,107 @@ def test_nothing_is_reported_while_the_job_is_still_running(
 
     assert server.report_vision(queue, RecordingUI(), []) == []
     assert queue.pending() == 1
+
+
+# ------------------------------------------------------------------ progress
+
+def test_progress_publishes_partial_text_without_finishing(
+        queue, workspace) -> None:
+    """Half a second per token is unavoidable; hiding it is not."""
+    queue.submit(workspace / "photo.png", "描述")
+    claimed = queue.claim()
+
+    queue.progress(claimed, "这张图片", 4)
+
+    live = queue.watching()
+    assert [job.partial for job in live] == ["这张图片"]
+    assert live[0].tokens == 4
+    assert live[0].state == "claimed"
+    assert queue.collect() == [], "partial work is not a delivery"
+
+
+def test_progress_is_overwritten_not_appended(queue, workspace) -> None:
+    queue.submit(workspace / "photo.png", "描述")
+    claimed = queue.claim()
+
+    queue.progress(claimed, "这张", 2)
+    queue.progress(claimed, "这张图片展示", 6)
+
+    assert queue.watching()[0].partial == "这张图片展示"
+
+
+def test_finishing_clears_the_partial_so_it_cannot_be_shown_twice(
+        queue, workspace) -> None:
+    queue.submit(workspace / "photo.png", "描述")
+    claimed = queue.claim()
+    moving = queue.progress(claimed, "这张图片", 4)
+
+    done = queue.finish(moving, "这张图片展示了一个界面。", elapsed=13.2)
+
+    assert done.partial is None
+    assert done.answer == "这张图片展示了一个界面。"
+    assert queue.watching() == []
+
+
+def test_watching_is_empty_before_a_worker_claims(queue, workspace) -> None:
+    queue.submit(workspace / "photo.png", "描述")
+    assert queue.watching() == []
+
+
+# --------------------------------------------------------------------- input
+
+def test_the_prompt_polls_the_queue_instead_of_blocking(
+        server, queue, workspace, monkeypatch, capsys) -> None:
+    """The answer becomes ready while the user sits at the prompt.
+
+    A blocking read would show nothing until they typed again, so the wait
+    has to be a poll that can draw in the meantime.
+    """
+    queue.submit(workspace / "photo.png", "描述")
+    claimed = queue.claim()
+    queue.progress(claimed, "这张图片展示", 6)
+
+    calls = {"select": 0}
+
+    class FakeStdin:
+        def isatty(self):
+            return True
+
+        def readline(self):
+            return "你好\n"
+
+    def fake_select(rlist, _w, _x, _timeout):
+        calls["select"] += 1
+        # Idle for two wakeups, then the user types.
+        return (rlist, [], []) if calls["select"] > 2 else ([], [], [])
+
+    monkeypatch.setattr(server.sys, "stdin", FakeStdin())
+    monkeypatch.setattr(server.select, "select", fake_select)
+    ui = RecordingUI()
+    ui.paint = lambda text, _code: text
+
+    line = server.watch_vision(queue, ui, "You > ", timeout=0)
+
+    assert line == "你好\n"
+    assert calls["select"] == 3
+    drawn = capsys.readouterr().out
+    assert "这张图片展示" in drawn, "progress must reach the screen while idle"
+    assert "6 词" in drawn
+
+
+def test_a_plain_read_is_used_when_there_is_no_queue(
+        server, monkeypatch) -> None:
+    monkeypatch.setattr("builtins.input", lambda prompt="": "hello")
+    assert server.watch_vision(None, RecordingUI(), "You > ") == "hello"
+
+
+def test_a_pipe_does_not_get_an_animation(server, queue, monkeypatch) -> None:
+    """Without a tty there is nothing to redraw; recordings must stay clean."""
+    class PipedStdin:
+        def isatty(self):
+            return False
+
+    monkeypatch.setattr(server.sys, "stdin", PipedStdin())
+    monkeypatch.setattr("builtins.input", lambda prompt="": "piped")
+
+    assert server.watch_vision(queue, RecordingUI(), "You > ") == "piped"

@@ -30,6 +30,7 @@ import os
 from pathlib import Path
 import struct
 import subprocess
+import select
 import sys
 import threading
 import time
@@ -118,6 +119,55 @@ def parse_transformer_output_slots(value):
         raise argparse.ArgumentTypeError(
             "output slots must be distinct K,V,H indices covering 0,1,2")
     return slots
+
+
+def watch_vision(queue, ui, prompt, timeout=0.4):
+    """Read one line from the user, showing vision progress while idle.
+
+    A blocking ``input()`` is the wrong shape for two models: the answer to
+    "describe this picture" becomes ready while the user is sitting at the
+    prompt, and nothing would print it until they typed again. So the wait is
+    a poll -- select on stdin, and between wakeups redraw a line carrying the
+    sentence the vision model has built so far.
+
+    The live line is rewritten in place and erased before the prompt is
+    reissued, so a terminal that scrolls back shows the finished answer once
+    rather than one row per token. Without a tty (a pipe, a test) there is
+    nothing to animate and the read is an ordinary one.
+    """
+    if queue is None or not sys.stdin.isatty():
+        return input(prompt)
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    drawn = False
+    while True:
+        ready, _, _ = select.select([sys.stdin], [], [], timeout)
+        if ready:
+            if drawn:
+                # Erase the progress line; the user is about to type on it.
+                sys.stdout.write("\r\033[2K")
+                sys.stdout.write(prompt)
+                sys.stdout.flush()
+            return sys.stdin.readline()
+        try:
+            watching = queue.watching()
+        except Exception:                                        # noqa: BLE001
+            return input("")
+        if not watching:
+            if drawn:
+                sys.stdout.write("\r\033[2K" + prompt)
+                sys.stdout.flush()
+                drawn = False
+            continue
+        job = watching[0]
+        tail = (job.partial or "")[-60:]
+        count = job.tokens or 0
+        line = ui.paint(
+            f"  vision · {Path(job.image_path).name} · {count} 词 · {tail}",
+            "2;38;5;75")
+        sys.stdout.write("\r\033[2K" + line)
+        sys.stdout.flush()
+        drawn = True
 
 
 def report_vision(queue, ui, messages):
@@ -2139,7 +2189,10 @@ def main() -> int:
 
             while True:
                 try:
-                    spec = input(ui.prompt()).strip()
+                    line = watch_vision(vision_queue, ui, ui.prompt())
+                    if line == "":
+                        raise EOFError
+                    spec = line.strip()
                 except EOFError:
                     print("", flush=True)
                     break

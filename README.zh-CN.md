@@ -372,6 +372,7 @@ ATC/DDK/libinstsim、`libsvp_custom.so` 和私有板端信息不会进入源码�
 
 - [Agent 路由与运行时 Context Profile 设计](docs/AGENT_ROUTING_AND_CONTEXT_PROFILES.zh-CN.md)
 - [Native 多 Token Prefill 调度契约](docs/NATIVE_PREFILL_SCHEDULER.zh-CN.md)
+- [一颗 NPU 上的两个模型：视觉 skill](docs/MULTIMODAL_VISION.zh-CN.md)
 - [量化契约](docs/QUANTIZATION_CONTRACT.zh-CN.md)
 - [端到端流水线](docs/PIPELINE.zh-CN.md)
 - [OM 图级组合契约](docs/OM_COMPOSITION.zh-CN.md)

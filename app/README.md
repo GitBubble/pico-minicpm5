@@ -107,6 +107,18 @@ the **host** run `./app/install_python.sh --board root@BOARD` (see both
 "Euler Pi factory image" chapters in the project README). Interactive SSH
 login then prints Chip / SDK / Hardware / Software.
 
+Factory `search_tool` restamps `eth0` from `/opt/cfg/dev_info.config`
+(`192.168.1.168/24` by default), so a one-shot `192.168.137.100` vanishes
+after reboot. `install_euler_usbnet.sh` patches that config, installs
+`S93pico_usbnet`, and keeps IPv6 enabled. If IPv4/ARP is incomplete but the
+USB link is up:
+
+```bash
+ping6 ff02::1%en8
+ssh root@fe80::acea:fbff:fe30:daae%en8   # password ebaina; address is EUI-64 of eth0
+# then: sh -s < app/install_euler_usbnet.sh
+```
+
 ## Run on Euler Pi (commercial SDK)
 
 ```bash
@@ -176,13 +188,23 @@ agent retains conversation/tool history until `/clear`; model handles,
 executor and device buffers remain resident.
 
 Built-ins are `list_directory`, `read_file`, `search_text`, `git_status`,
-`calculate`, `write_file` and `run_shell`. The first five run automatically —
+`calculate`, `write_file` and `run_shell`, plus `describe_image` where a vision
+worker is configured. The first five run automatically —
 `calculate` evaluates a closed arithmetic language with no filesystem, no
 subprocess and no name outside its own table, so it is weaker than a read.
 Writes and shell commands prompt `Allow once? [y/N]` every time and default to
 deny. File tools are confined to the startup working directory; use
 `--workspace PATH` to set an explicit boundary. `/tools`, `/permissions` and
 `/context` display the registry, policy and token budget.
+
+`describe_image` hands a picture to a second model — MiniCPM-4v-0.5B, in its
+own process behind a job queue — and returns a job id immediately rather than
+blocking this REPL for the `21.5 s` an image takes. The description streams
+back into the prompt line as it is generated, and joins the transcript when it
+completes. Pass `--vision-queue PATH` to both `agent.sh` and `vision_worker.py`
+to enable it; without it the tool is not disclosed at all, so a board with no
+vision worker spends no prompt tokens on it. See
+[docs/MULTIMODAL_VISION.md](../docs/MULTIMODAL_VISION.md).
 
 `/help` prints Linux-style command help with syntax, ranges and scope. Use
 `/help COMMAND` (for example, `/help max`) for the detailed form.

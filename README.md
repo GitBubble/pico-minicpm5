@@ -548,7 +548,11 @@ See [docs/PIPELINE.md](docs/PIPELINE.md),
 [Agent routing and runtime-context profile design](docs/AGENT_ROUTING_AND_CONTEXT_PROFILES.md)
 defines hybrid routing and the ctx128/1024/4096/8192 capability matrix; the
 [native prefill scheduler](docs/NATIVE_PREFILL_SCHEDULER.md) defines the
-`S128 -> S32 -> S16 -> S1` TTFT path and its activation gates. The
+`S128 -> S32 -> S16 -> S1` TTFT path and its activation gates. Running a
+second model alongside the first — MiniCPM-4v-0.5B reading images while
+MiniCPM5-1B keeps answering — is described in
+[two models on one NPU](docs/MULTIMODAL_VISION.md), including why generation
+there is repeated prefill and what that costs per token. The
 [quantization contract](docs/QUANTIZATION_CONTRACT.md) records how ATC's IFMR
 search and the in-graph `Clip` bounds combine (`min(inferred, clip)`), and why
 position zero needs its own calibration family. Euler Pi factory Linux needs

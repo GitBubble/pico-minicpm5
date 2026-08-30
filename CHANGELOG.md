@@ -4,6 +4,36 @@
 
 ## Unreleased
 
+### Multimodal: a vision skill running beside the language model
+
+- `describe_image` hands a picture to MiniCPM-4v-0.5B and returns a job id in
+  about a millisecond, so the ctx8192 agent keeps answering while an image is
+  read. The two models cannot share the NPU turn by turn — three resident OM
+  handles each — so they are joined by a filesystem job queue
+  (`app/src/vision_jobs.py`), one JSON file per job, every transition an
+  atomic rename. A crashed worker leaves a claimed job visible rather than
+  lost, and either process can restart under the other.
+- `app/src/vision_worker.py` owns the 4v handles. `decode.om` declares 53
+  inputs and 49 outputs against this SDK's 32-port cap and will not load, so
+  there is no KV-cached decode step; generation is instead repeated prefill
+  over the 200-row window with the answer so far appended. Measured on
+  Hi3403, 1440x900 screenshot, 40-token cap: claimed `1.02 s`, first token
+  `1.98 s`, `0.52 s` per token flat, done `22.56 s`.
+- The answer streams. `VisionQueue.progress` publishes after every token, and
+  the agent prompt polls with `select` instead of blocking in `input()`, so a
+  description that becomes ready while the user sits idle is drawn as it is
+  written. Non-tty callers — pipes, tests, recordings — get an ordinary read.
+- `app/src/minicpm4v_vision.py` ports the published C++ preprocessing
+  contract: 512x512 CUBIC, `(x/255-0.5)/0.5`, the 16x16 patch reshape, the
+  200-token template and its two-pass mask, and a greedy longest-match
+  vocabulary (the table is not BPE). The 300 MB embedding table is read by
+  seek, never loaded.
+- Vision is disclosed only where a worker exists and only when a turn has
+  both vision intent and a named file. A tool schema is charged in prefill
+  tokens on every turn that names it, so `--vision-queue` absent means the
+  tool is absent, not present-and-refusing.
+- New: [docs/MULTIMODAL_VISION.md](docs/MULTIMODAL_VISION.md).
+
 ### Community SDK (Orange Pi AIfly / Pegasus)
 
 - Ubuntu 22.04 Jammy, kernel `6.6.86-hi3403`: `chat.sh` selects

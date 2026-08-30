@@ -102,6 +102,17 @@ Euler Pi 出厂 Linux 会装上 `ot_pqp.ko`，挡住 `/dev/svp_npu`，而且没�
 「Euler Pi 出厂镜像」两节）。交互式 SSH 登录会打印 Chip / SDK / Hardware /
 Software。
 
+厂方 `search_tool` 每次开机按 `/opt/cfg/dev_info.config` 把 `eth0` 写成
+`192.168.1.168/24`，一次性加的 `192.168.137.100` 会丢。
+`install_euler_usbnet.sh` 改这份配置、装 `S93pico_usbnet`，并保持 IPv6。
+IPv4/ARP 为 incomplete、USB 链路仍在时：
+
+```bash
+ping6 ff02::1%en8
+ssh root@fe80::acea:fbff:fe30:daae%en8   # 密码 ebaina；地址是 eth0 的 EUI-64
+# 然后: sh -s < app/install_euler_usbnet.sh
+```
+
 ## 在 Euler Pi 上运行（商业 SDK）
 
 ```bash
@@ -168,12 +179,20 @@ template，并保留多轮历史直至 `/clear`；`agent.sh` 再加入下面描�
 每个问题重新加载约 10 秒。
 
 内置工具为 `list_directory`、`read_file`、`search_text`、`git_status`、
-`calculate`、`write_file` 和 `run_shell`。前五项自动执行——`calculate` 只在
+`calculate`、`write_file` 和 `run_shell`；配置了视觉 worker 时还有
+`describe_image`。前五项自动执行——`calculate` 只在
 一套封闭的算术语言内求值，不碰文件系统、不起子进程、不解析自身表以外的任何
 名字，因此比只读工具还弱。文件写入和 shell 每次都弹出
 `Allow once? [y/N]`，默认拒绝。所有文件工具被限制在启动时的工作目录内，可用
 `--workspace PATH` 显式指定边界。`/tools`、`/permissions` 和 `/context` 分别
 显示工具、权限和 token 预算。
+
+`describe_image` 把图片交给第二个模型——MiniCPM-4v-0.5B，跑在自己的进程里、
+通过作业队列衔接——并立即返回作业号，而不是让本 REPL 为一张图阻塞 `21.5 s`。
+描述会边生成边回流到提示符行上，完成后并入对话记录。给 `agent.sh` 和
+`vision_worker.py` 都传 `--vision-queue PATH` 即可启用；不传则该工具完全不被
+声明，所以没有视觉 worker 的板子不会为它花掉任何提示词 token。详见
+[docs/MULTIMODAL_VISION.zh-CN.md](../docs/MULTIMODAL_VISION.zh-CN.md)。
 
 `/help` 会按 Linux 命令行风格列出命令的语法、参数范围与作用域；使用
 `/help COMMAND`（例如 `/help max`）可查看单个命令的详细说明。

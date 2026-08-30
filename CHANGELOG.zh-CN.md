@@ -4,6 +4,29 @@
 
 ## Unreleased
 
+### 多模态：与语言模型并行的视觉 skill
+
+- `describe_image` 把图片交给 MiniCPM-4v-0.5B，约一毫秒内返回作业号，因此
+  ctx8192 agent 在看图期间照常应答。两个模型无法逐回合共享 NPU——各自常驻
+  三个 OM 句柄——所以用文件系统作业队列衔接（`app/src/vision_jobs.py`），
+  一条作业一个 JSON 文件，每次状态迁移都是原子 rename。worker 崩溃留下的是
+  看得见的 claimed 作业而不是丢失的作业，两个进程可以各自独立重启。
+- `app/src/vision_worker.py` 持有 4v 句柄。`decode.om` 声明 53 输入 49 输出，
+  超过本 SDK 的 32 端口上限，装不进去，因此没有 KV 缓存解码步；生成改为在
+  200 行窗口上把已生成部分追加后反复 prefill。Hi3403 实测，1440x900 截图，
+  40 词上限：领取 `1.02 s`、首词 `1.98 s`、`0.52 s`/词平直、完成 `22.56 s`。
+- 答案是流式的。`VisionQueue.progress` 每个词发布一次，agent 提示符改用
+  `select` 轮询而不是阻塞在 `input()` 上，所以用户闲置期间生成好的描述会
+  边写边显示。非 tty 调用方——管道、测试、录制——走普通读取。
+- `app/src/minicpm4v_vision.py` 移植了已公布的 C++ 预处理契约：512x512
+  CUBIC、`(x/255-0.5)/0.5`、16x16 patch reshape、200 token 模板及其两遍
+  掩码，以及贪心最长匹配词表（该表不是 BPE）。300 MB 嵌入表按 seek 读取，
+  从不整体加载。
+- 视觉工具只在存在 worker 时、且该回合同时具备视觉意图与点名文件时才声明。
+  工具 schema 在每个提到它的回合都按 prefill token 计费，所以没有
+  `--vision-queue` 就等于该工具不存在，而不是存在但必然被拒绝。
+- 新增：[docs/MULTIMODAL_VISION.zh-CN.md](docs/MULTIMODAL_VISION.zh-CN.md)。
+
 ### 社区 SDK（Orange Pi AIfly / Pegasus）
 
 - Ubuntu 22.04 Jammy，内核 `6.6.86-hi3403`：`chat.sh` 选 `app/glibc239/` 加

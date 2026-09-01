@@ -92,6 +92,14 @@ on AIfly — stop the userspace, do not `rmmod` `gfbg`/`ot_vo`.
 └── assets/{token_embedding.f16.bin,tokenizer.json}
 ```
 
+The vision skill adds one optional tree, staged anywhere both the agent and the
+worker can read. It is not part of the release bundle:
+
+```text
+$VLM/{vision.om,resample.om,prefill_decode.om,token_emb.bin,tokenizer.json}
+$QUEUE/                                    # one JSON file per job; created on use
+```
+
 Euler Pi uses `app/lib/` (see `lib/README.md`) and the `.aarch64` executor.
 Orange Pi AIfly uses `app/glibc239/` plus
 `pico_persistent_acl_executor.community.bin` (statically linked Pegasus
@@ -376,6 +384,110 @@ Euler Pi factory image (`/opt/ko/svp_npu`) it uses `app/lib` and the
 `.aarch64` executor. Override with `PICO_RUNTIME_LIB`. Python is detected
 first at `$PICO_MINICPM5_ROOT/venv/bin/python`, then as `python3`. AIfly
 already has `python3`; set `TOKENIZERS` if wheels live under `pylib/`.
+
+## Vision: deploying a second model beside the agent
+
+`describe_image` hands a picture to MiniCPM-4v-0.5B while MiniCPM5-1B keeps
+answering. The two cannot take turns on the NPU — three resident OM handles
+each — so they run as two processes joined by a job queue. Design and
+measurements are in [docs/MULTIMODAL_VISION.md](../docs/MULTIMODAL_VISION.md);
+this section is the deployment.
+
+### 1. Stage the vision model
+
+Five files, `846 MB`, from the published MiniCPM-4v-0.5B artifacts:
+
+```text
+$VLM/
+├── vision.om            #  91 MB  image  -> patch hidden
+├── resample.om          # 7.2 MB  hidden -> 64 vision tokens
+├── prefill_decode.om    # 445 MB  the 200-row window; emits logits and K/V
+├── token_emb.bin        # 301 MB  read by seek, never loaded whole
+└── tokenizer.json       # 3.7 MB  greedy longest-match table, NOT BPE
+```
+
+`decode.om` ships with that model and is **deliberately not staged**. It
+declares 53 inputs and 49 outputs — five plus one port per layer for each of
+K and V — against this SDK's cap of 32, so it is refused at load time. Nothing
+is lost: `prefill_decode.om` emits logits for its whole window, so each token
+comes from another prefill with the answer so far appended. Staging the extra
+`436 MB` buys a guaranteed load failure.
+
+Check free space first. The three handles are `543 MB` resident and the
+embedding table is another `301 MB` on disk:
+
+```bash
+df -h /            # needs ~900 MB free before staging
+```
+
+### 2. Start the worker
+
+The worker owns the 4v handles and nothing else. It survives the agent
+restarting and vice versa, so start it once and leave it:
+
+```bash
+setsid env PYTHONPATH=$APP/src nohup python3 -u $APP/src/vision_worker.py \
+  --queue "$QUEUE" --model-dir "$VLM" --executable "$EXE" \
+  --library-path /opt/lib/svp_npu --library-path /opt/lib --library-path /opt/lib/npu \
+  --poll-seconds 1.0 --max-new 40 \
+  > "$QUEUE/../vision_worker.log" 2>&1 < /dev/null &
+```
+
+It prints one line when the handles are up:
+
+```text
+vision_worker=ready handles=3 queue=/…/queue
+```
+
+`--max-new` is a latency budget, not a quality knob: every token is a whole
+prefill, so 40 tokens is 21 s and 80 is 42. `--poll-seconds` is the floor on
+how fast a job is picked up — `1.0` costs a second before the first token and
+is the right default for a background skill.
+
+### 3. Point the agent at the same queue
+
+```bash
+./app/agent.sh --profile ctx8192 --vision-queue "$QUEUE"
+```
+
+`$QUEUE` is any directory both processes can write. It holds one JSON file per
+job; there is no daemon and no socket. Without the flag `describe_image` is not
+disclosed at all, so a board with no worker spends no prompt tokens on it.
+
+### 4. What it looks like
+
+```text
+You ❯ 描述一下 photo.png
+⚙ describe_image(path='photo.png')
+✓ describe_image: job 53df9b7bc772 queued for the vision model
+MiniCPM ✦ 好的，我已收到关于 photo.png 的描述信息。
+  12 tokens · 7.69 tok/s · eos
+You ❯   vision · photo.png · 17 词 · …的软件界面。在顶部，可以看到
+```
+
+The last line is redrawn in place while the user sits at the prompt — the
+answer is written into the transcript when it completes, so a following turn
+can be asked about the picture.
+
+Measured end to end on Hi3403, a 1440×900 screenshot, 40-token cap:
+
+| | |
+|---|---|
+| claimed by the worker | `1.02 s` |
+| first token visible | `1.98 s` |
+| cadence | `0.52 s` per token, flat |
+| done | `22.56 s` |
+
+### Troubleshooting
+
+| Symptom | Cause |
+|---|---|
+| `describe_image` is not in `/tools` | `--vision-queue` was not passed; the tool is disclosed only where a worker exists. |
+| Tool answers `no vision worker is configured` | The agent has the flag, the worker does not, or the two point at different directories. |
+| Job stays `queued` | No worker is running. `pgrep -f vision_worker.py`, and read `vision_worker.log`. |
+| Job stays `claimed` after a crash | Expected and recoverable: the record is on disk. Rename `claimed.<id>.json` back to `queued.<id>.json` to retry. |
+| `model[N] failed` at load | Staging included `decode.om`. Remove it; see step 1. |
+| First token takes much longer than `2 s` | `--poll-seconds` is high, or the image is large — preprocessing is paid once per image, not per token. |
 
 ## Quick checks
 

@@ -88,6 +88,14 @@ Jammy 2.35 必须走 sidecar loader。AIfly 上图形（LightDM / `sample_gfbg`�
 └── assets/{token_embedding.f16.bin,tokenizer.json}
 ```
 
+视觉 skill 另外需要一棵可选的目录树，放在 agent 和 worker 都能读到的任意位置。
+它不属于发布包：
+
+```text
+$VLM/{vision.om,resample.om,prefill_decode.om,token_emb.bin,tokenizer.json}
+$QUEUE/                                    # 每条作业一个 JSON 文件；用到时自动创建
+```
+
 Euler Pi 用 `app/lib/`（见 `lib/README.zh-CN.md`）和 `.aarch64` 执行器。
 Orange Pi AIfly 用 `app/glibc239/` 加上
 `pico_persistent_acl_executor.community.bin`（静态链 Pegasus `libsvp_acl.a`
@@ -340,6 +348,106 @@ Jammy / `/usr/lib/svp_npu` 上，`chat.sh` 用
 `PICO_RUNTIME_LIB` 覆盖。Python 依次探测
 `$PICO_MINICPM5_ROOT/venv/bin/python` 和 `python3`。AIfly 自带 `python3`；
 轮子若在 `pylib/` 下，设置 `TOKENIZERS`。
+
+## 视觉：在 agent 旁边部署第二个模型
+
+`describe_image` 把图片交给 MiniCPM-4v-0.5B，同时 MiniCPM5-1B 照常应答。
+两者无法在 NPU 上轮流跑——各自常驻三个 OM 句柄——所以它们是两个进程，
+由作业队列衔接。设计与实测见
+[docs/MULTIMODAL_VISION.zh-CN.md](../docs/MULTIMODAL_VISION.zh-CN.md)；
+本节讲部署。
+
+### 1. 布置视觉模型
+
+五个文件，`846 MB`，来自已发布的 MiniCPM-4v-0.5B 工件：
+
+```text
+$VLM/
+├── vision.om            #  91 MB  图像   -> patch hidden
+├── resample.om          # 7.2 MB  hidden -> 64 个视觉 token
+├── prefill_decode.om    # 445 MB  200 行窗口；输出 logits 与 K/V
+├── token_emb.bin        # 301 MB  按 seek 读，从不整体加载
+└── tokenizer.json       # 3.7 MB  贪心最长匹配词表，**不是** BPE
+```
+
+该模型自带的 `decode.om` **有意不布置**。它声明 53 个输入、49 个输出——
+5 个，加上每层 K 和 V 各一个端口——超过本 SDK 的 32 上限，装载期就被拒绝。
+这没有任何损失：`prefill_decode.om` 会输出整个窗口的 logits，所以每个词都由
+"把已生成部分追加后再跑一次 prefill"得到。多放那 `436 MB` 只会换来一次
+必然失败的装载。
+
+先看空间。三个句柄常驻 `543 MB`，嵌入表另占 `301 MB` 磁盘：
+
+```bash
+df -h /            # 布置前需要约 900 MB 可用
+```
+
+### 2. 启动 worker
+
+worker 只持有 4v 句柄，别的什么都不管。它与 agent 可以各自独立重启，
+所以启动一次放着即可：
+
+```bash
+setsid env PYTHONPATH=$APP/src nohup python3 -u $APP/src/vision_worker.py \
+  --queue "$QUEUE" --model-dir "$VLM" --executable "$EXE" \
+  --library-path /opt/lib/svp_npu --library-path /opt/lib --library-path /opt/lib/npu \
+  --poll-seconds 1.0 --max-new 40 \
+  > "$QUEUE/../vision_worker.log" 2>&1 < /dev/null &
+```
+
+句柄就绪后它只打一行：
+
+```text
+vision_worker=ready handles=3 queue=/…/queue
+```
+
+`--max-new` 是时延预算，不是质量旋钮：每个词都是一次完整 prefill，
+所以 40 词是 21 秒，80 词是 42 秒。`--poll-seconds` 决定作业被捡起的最快速度
+——`1.0` 会在首词之前花掉一秒，作为后台 skill 的默认值是合适的。
+
+### 3. 让 agent 指向同一个队列
+
+```bash
+./app/agent.sh --profile ctx8192 --vision-queue "$QUEUE"
+```
+
+`$QUEUE` 是两个进程都能写的任意目录，里面每条作业一个 JSON 文件；
+没有守护进程，也没有套接字。不传这个参数时 `describe_image` 完全不被声明，
+所以没有 worker 的板子不会为它花掉任何提示词 token。
+
+### 4. 实际效果
+
+```text
+You ❯ 描述一下 photo.png
+⚙ describe_image(path='photo.png')
+✓ describe_image: job 53df9b7bc772 queued for the vision model
+MiniCPM ✦ 好的，我已收到关于 photo.png 的描述信息。
+  12 tokens · 7.69 tok/s · eos
+You ❯   vision · photo.png · 17 词 · …的软件界面。在顶部，可以看到
+```
+
+最后一行会在用户停在提示符上时原地重绘；描述完成后写入对话记录，
+所以下一回合可以接着问这张图。
+
+Hi3403 端到端实测，1440×900 截图，40 词上限：
+
+| | |
+|---|---|
+| 被 worker 领取 | `1.02 s` |
+| 首词可见 | `1.98 s` |
+| 节奏 | `0.52 s`/词，平直 |
+| 完成 | `22.56 s` |
+
+### 排障
+
+| 现象 | 原因 |
+|---|---|
+| `/tools` 里没有 `describe_image` | 没传 `--vision-queue`；该工具只在存在 worker 时声明。 |
+| 工具回 `no vision worker is configured` | agent 有这个参数而 worker 没有，或两者指向了不同目录。 |
+| 作业一直是 `queued` | 没有 worker 在跑。`pgrep -f vision_worker.py`，并看 `vision_worker.log`。 |
+| 崩溃后作业停在 `claimed` | 这是预期且可恢复的：记录在盘上。把 `claimed.<id>.json` 改回 `queued.<id>.json` 即可重试。 |
+| 装载时报 `model[N] failed` | 布置时带上了 `decode.om`。删掉它，见第 1 步。 |
+| 首词远超 `2 s` | `--poll-seconds` 设得太大，或图片很大——预处理每张图付一次，不是每个词付一次。 |
 
 ## 快速排障
 

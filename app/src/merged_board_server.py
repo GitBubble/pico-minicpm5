@@ -121,7 +121,7 @@ def parse_transformer_output_slots(value):
     return slots
 
 
-def watch_vision(queue, ui, prompt, timeout=0.4):
+def watch_vision(queue, ui, prompt, messages=None, timeout=0.4):
     """Read one line from the user, showing vision progress while idle.
 
     A blocking ``input()`` is the wrong shape for two models: the answer to
@@ -130,41 +130,55 @@ def watch_vision(queue, ui, prompt, timeout=0.4):
     a poll -- select on stdin, and between wakeups redraw a line carrying the
     sentence the vision model has built so far.
 
-    The live line is rewritten in place and erased before the prompt is
-    reissued, so a terminal that scrolls back shows the finished answer once
-    rather than one row per token. Without a tty (a pipe, a test) there is
-    nothing to animate and the read is an ordinary one.
+    Readline still owns the edit. The idle prompt drawn here is only a
+    placeholder; the moment stdin becomes readable it is erased and ``input``
+    is called, which redraws its own prompt and reads the line with history
+    and editing intact. That also keeps the readline-only ``\001``/``\002``
+    zero-width markers out of the terminal, where they would print as stray
+    control bytes and break anything matching on the prompt text.
+
+    A job that finishes while the user is idle is reported here too. Without
+    that the sentence builds, reaches its last token, and then vanishes when
+    the record leaves ``claimed`` -- the answer would not appear until the
+    user happened to type something.
+
+    Without a tty there is nothing to animate and the read is an ordinary one.
     """
     if queue is None or not sys.stdin.isatty():
         return input(prompt)
-    sys.stdout.write(prompt)
+    # Readline's zero-width markers are meaningful only inside input().
+    plain_prompt = prompt.replace("\001", "").replace("\002", "")
+    sys.stdout.write(plain_prompt)
     sys.stdout.flush()
     drawn = False
     while True:
         ready, _, _ = select.select([sys.stdin], [], [], timeout)
         if ready:
-            if drawn:
-                # Erase the progress line; the user is about to type on it.
-                sys.stdout.write("\r\033[2K")
-                sys.stdout.write(prompt)
-                sys.stdout.flush()
-            return sys.stdin.readline()
+            # Hand the line to readline, which reissues the prompt itself.
+            sys.stdout.write("\r\033[2K")
+            sys.stdout.flush()
+            return input(prompt)
         try:
             watching = queue.watching()
         except Exception:                                        # noqa: BLE001
-            return input("")
+            ui.info("vision queue unreadable")
+            return input(prompt)
         if not watching:
+            # Nothing in flight. Anything that just finished is delivered now
+            # rather than waiting for the user's next keystroke.
             if drawn:
-                sys.stdout.write("\r\033[2K" + prompt)
-                sys.stdout.flush()
+                sys.stdout.write("\r\033[2K")
                 drawn = False
+            if report_vision(queue, ui, messages if messages is not None
+                             else []):
+                sys.stdout.write(plain_prompt)
+            sys.stdout.flush()
             continue
         job = watching[0]
-        tail = (job.partial or "")[-60:]
-        count = job.tokens or 0
+        tail = (job.partial or "")[-56:]
         line = ui.paint(
-            f"  vision · {Path(job.image_path).name} · {count} 词 · {tail}",
-            "2;38;5;75")
+            f"  vision · {Path(job.image_path).name} · "
+            f"{job.tokens or 0} 词 · {tail}", "2;38;5;75")
         sys.stdout.write("\r\033[2K" + line)
         sys.stdout.flush()
         drawn = True
@@ -2189,7 +2203,8 @@ def main() -> int:
 
             while True:
                 try:
-                    line = watch_vision(vision_queue, ui, ui.prompt())
+                    line = watch_vision(vision_queue, ui, ui.prompt(),
+                                        messages)
                     if line == "":
                         raise EOFError
                     spec = line.strip()

@@ -1145,8 +1145,11 @@ class WorkspaceTools:
                     "required": ["ref"],
                 }, self._read_result_page),
                 Tool("describe_image", (
-                    "Ask the vision model about an image file. Returns a job "
-                    "id at once; the description arrives on a later turn."), {
+                    "Ask the vision model about an image. path is relative to "
+                    "the workspace root: the file name in the request IS the "
+                    "path, so call this immediately and never ask the user "
+                    "where the image is. Returns a job id at once; the "
+                    "description arrives on a later turn."), {
                     **obj, "properties": {
                         "path": {"type": "string"},
                         "question": {"type": "string"}},

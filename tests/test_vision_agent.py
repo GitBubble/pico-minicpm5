@@ -78,6 +78,9 @@ class RecordingUI:
     def info(self, text: str) -> None:
         self.lines.append(str(text))
 
+    def paint(self, text: str, _code: str) -> str:
+        return str(text)
+
 
 # ---------------------------------------------------------------- disclosure
 
@@ -314,9 +317,6 @@ def test_the_prompt_polls_the_queue_instead_of_blocking(
         def isatty(self):
             return True
 
-        def readline(self):
-            return "你好\n"
-
     def fake_select(rlist, _w, _x, _timeout):
         calls["select"] += 1
         # Idle for two wakeups, then the user types.
@@ -324,16 +324,69 @@ def test_the_prompt_polls_the_queue_instead_of_blocking(
 
     monkeypatch.setattr(server.sys, "stdin", FakeStdin())
     monkeypatch.setattr(server.select, "select", fake_select)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "你好")
     ui = RecordingUI()
     ui.paint = lambda text, _code: text
 
     line = server.watch_vision(queue, ui, "You > ", timeout=0)
 
-    assert line == "你好\n"
+    assert line == "你好"
     assert calls["select"] == 3
     drawn = capsys.readouterr().out
     assert "这张图片展示" in drawn, "progress must reach the screen while idle"
     assert "6 词" in drawn
+
+
+def test_readline_reads_the_line_so_editing_and_history_survive(
+        server, queue, monkeypatch) -> None:
+    """Polling must not cost the user their line editor."""
+    seen = {}
+
+    class FakeStdin:
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(server.sys, "stdin", FakeStdin())
+    monkeypatch.setattr(server.select, "select",
+                        lambda r, _w, _x, _t: (r, [], []))
+    monkeypatch.setattr("builtins.input",
+                        lambda prompt="": seen.setdefault("prompt", prompt)
+                        and None or "typed")
+
+    assert server.watch_vision(queue, RecordingUI(), "PROMPT") == "typed"
+    assert seen["prompt"] == "PROMPT", "input() must own the real prompt"
+
+
+def test_readline_zero_width_markers_never_reach_the_terminal(
+        server, queue, workspace, monkeypatch, capsys) -> None:
+    """\001/\002 mean something only inside input().
+
+    Written straight to a terminal they print as stray control bytes and
+    break anything matching on the prompt text -- which is exactly how this
+    was found: a session recorder stopped seeing the prompt.
+    """
+    queue.submit(workspace / "photo.png", "描述")
+    queue.claim()
+    calls = {"n": 0}
+
+    class FakeStdin:
+        def isatty(self):
+            return True
+
+    def fake_select(rlist, _w, _x, _timeout):
+        calls["n"] += 1
+        return (rlist, [], []) if calls["n"] > 1 else ([], [], [])
+
+    monkeypatch.setattr(server.sys, "stdin", FakeStdin())
+    monkeypatch.setattr(server.select, "select", fake_select)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "x")
+
+    readline_prompt = "\001\033[1mYou\002 \001\033[0m\002❯ "
+    server.watch_vision(queue, RecordingUI(), readline_prompt, timeout=0)
+
+    drawn = capsys.readouterr().out
+    assert "\001" not in drawn and "\002" not in drawn
+    assert "You" in drawn and "❯" in drawn
 
 
 def test_a_plain_read_is_used_when_there_is_no_queue(
@@ -352,3 +405,75 @@ def test_a_pipe_does_not_get_an_animation(server, queue, monkeypatch) -> None:
     monkeypatch.setattr("builtins.input", lambda prompt="": "piped")
 
     assert server.watch_vision(queue, RecordingUI(), "You > ") == "piped"
+
+
+def test_an_answer_that_lands_while_idle_is_delivered_without_a_keystroke(
+        server, queue, workspace, monkeypatch, capsys) -> None:
+    """The promise of the queue: the answer arrives while you sit there.
+
+    Once a job leaves `claimed` the progress line has nothing to draw, so
+    without collecting here the finished sentence would simply vanish until
+    the user happened to type.
+    """
+    queue.submit(workspace / "photo.png", "描述")
+    queue.finish(queue.claim(), "一只猫坐在窗台上。", elapsed=12.0)
+
+    calls = {"n": 0}
+
+    class FakeStdin:
+        def isatty(self):
+            return True
+
+    def fake_select(rlist, _w, _x, _timeout):
+        calls["n"] += 1
+        return (rlist, [], []) if calls["n"] > 1 else ([], [], [])
+
+    monkeypatch.setattr(server.sys, "stdin", FakeStdin())
+    monkeypatch.setattr(server.select, "select", fake_select)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "next question")
+    ui = RecordingUI()
+    messages = []
+
+    server.watch_vision(queue, ui, "You > ", messages, timeout=0)
+
+    assert any("一只猫坐在窗台上。" in line for line in ui.lines)
+    assert messages and "一只猫坐在窗台上。" in messages[-1]["content"]
+
+
+def test_an_idle_collect_still_works_without_a_transcript(
+        server, queue, workspace, monkeypatch) -> None:
+    """`messages` is optional; a caller that omits it must not crash."""
+    queue.submit(workspace / "photo.png", "描述")
+    queue.finish(queue.claim(), "答案", elapsed=1.0)
+    calls = {"n": 0}
+
+    class FakeStdin:
+        def isatty(self):
+            return True
+
+    def fake_select(rlist, _w, _x, _timeout):
+        calls["n"] += 1
+        return (rlist, [], []) if calls["n"] > 1 else ([], [], [])
+
+    monkeypatch.setattr(server.sys, "stdin", FakeStdin())
+    monkeypatch.setattr(server.select, "select", fake_select)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "x")
+    ui = RecordingUI()
+
+    assert server.watch_vision(queue, ui, "> ", timeout=0) == "x"
+    assert any("答案" in line for line in ui.lines)
+
+
+def test_the_tool_tells_the_model_not_to_ask_where_the_image_is(
+        agent, workspace, queue) -> None:
+    """A measured failure: with only this tool disclosed, the model replied
+    "please give me the path to chart.png" -- for a file named in the request
+    and sitting in the workspace. list_directory carries the same sentence
+    for the same reason."""
+    tools = agent.WorkspaceTools(workspace, vision_queue=queue)
+    spec = next(d for d in tools.definitions_for_profile("vision")
+                if d["function"]["name"] == "describe_image")
+
+    description = spec["function"]["description"]
+    assert "never ask" in description
+    assert "workspace root" in description

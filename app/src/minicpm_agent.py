@@ -343,6 +343,14 @@ _VISION_INTENT = (
 )
 #: File extensions the vision model can actually open.
 _IMAGE_SUFFIX = (".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif")
+_IMAGE_NAME = re.compile(
+    r"(?<![\w./-])([\w./-]+\.(?:png|jpe?g|bmp|webp|gif))\b", re.I)
+
+
+def _named_image(text: str) -> str | None:
+    """The image file a request names, if it names exactly one."""
+    found = _IMAGE_NAME.findall(text)
+    return found[0] if len(found) == 1 else None
 
 _WORKSPACE_NOUN = (
     "文件", "文件夹", "目录", "路径", "工作区", "仓库", "分支", "提交", "代码",
@@ -764,7 +772,7 @@ def _math_expression(text: str) -> str | None:
 
 
 def route_obvious_read_only(
-    user_text: str, previous_assistant: str = "",
+    user_text: str, previous_assistant: str = "", *, has_vision: bool = False,
 ) -> RouteDecision | None:
     """Route unambiguous, presentation-free read-only intents without an LLM.
 
@@ -789,6 +797,25 @@ def route_obvious_read_only(
             mode="DIRECT_TOOL", confidence=confidence, tool_calls=(call,),
             response_policy="DIRECT_FORMATTED", schema_profile="none",
             permission="automatic", reason=reason)
+
+    # "描述一下 chart.png" is unambiguous: a vision verb and a named image
+    # file. Left to the model it costs a full schema ingest and then does not
+    # reliably produce the call -- measured twice on ctx8192, once asking for
+    # a path it had been given and once announcing the lookup it never made.
+    # Submitting is cheap and reversible (a job id, no NPU work on this side),
+    # so the host does it and the model is not asked.
+    if has_vision and _has_term(lowered, _VISION_INTENT):
+        image = _named_image(text)
+        if image is not None:
+            # Always DIRECT, never TOOL_THEN_MODEL: this tool returns a job
+            # id, not content, so handing that to the model to "summarise"
+            # would spend a turn paraphrasing a hex string.
+            return RouteDecision(
+                mode="DIRECT_TOOL", confidence=0.99,
+                tool_calls=(ToolCall("describe_image", {"path": image}),),
+                response_policy="DIRECT_FORMATTED", schema_profile="none",
+                permission="automatic",
+                reason="explicit image description request")
 
     current_directory = (
         lowered in {"pwd", "cwd"}

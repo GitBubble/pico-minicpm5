@@ -175,10 +175,15 @@ def watch_vision(queue, ui, prompt, messages=None, timeout=0.4):
             sys.stdout.flush()
             continue
         job = watching[0]
-        tail = (job.partial or "")[-56:]
-        line = ui.paint(
-            f"  vision · {Path(job.image_path).name} · "
-            f"{job.tokens or 0} 词 · {tail}", "2;38;5;75")
+        name = Path(job.image_path).name
+        if not job.tokens:
+            # vision.om and resample.om run before the first token; a bare
+            # "0 词" with nothing after it reads as a stall.
+            line = ui.paint(f"  vision · {name} · 正在看图…", "2;38;5;75")
+        else:
+            tail = (job.partial or "")[-56:]
+            line = ui.paint(f"  vision · {name} · {job.tokens} 词 · {tail}",
+                            "2;38;5;75")
         sys.stdout.write("\r\033[2K" + line)
         sys.stdout.flush()
         drawn = True
@@ -2307,7 +2312,8 @@ def main() -> int:
                 messages.append({"role": "user", "content": spec})
                 route_started = time.perf_counter()
                 route_decision = agent.route_obvious_read_only(
-                    spec, previous_assistant)
+                    spec, previous_assistant,
+                    has_vision=vision_queue is not None)
                 route_ms = (time.perf_counter() - route_started) * 1000.0
                 tool_total_ms = 0.0
                 initial_tool_rounds = 0

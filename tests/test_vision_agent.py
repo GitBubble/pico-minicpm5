@@ -477,3 +477,81 @@ def test_the_tool_tells_the_model_not_to_ask_where_the_image_is(
     description = spec["function"]["description"]
     assert "never ask" in description
     assert "workspace root" in description
+
+
+# -------------------------------------------------------------------- routing
+
+@pytest.mark.parametrize("query,path", [
+    ("描述一下 chart.png", "chart.png"),
+    ("看看这张图 photo.jpg", "photo.jpg"),
+    ("这张图片里有什么 a.png", "a.png"),
+    ("describe screenshot.PNG", "screenshot.PNG"),
+])
+def test_an_unambiguous_image_request_is_routed_without_the_model(
+        agent, query, path) -> None:
+    """Measured twice on ctx8192: given only this tool, the model spent a full
+    schema ingest and still did not call it -- once asking for a path it had
+    been given, once announcing a lookup it never made. Submitting is cheap
+    and reversible, so the host does it."""
+    decision = agent.route_obvious_read_only(query, "", has_vision=True)
+
+    assert decision is not None
+    assert decision.mode == "DIRECT_TOOL"
+    assert decision.tool_calls[0].name == "describe_image"
+    assert decision.tool_calls[0].arguments["path"] == path
+
+
+def test_the_vision_route_never_hands_a_job_id_to_the_model(agent) -> None:
+    """A transform word would normally add a model pass. Not here: the tool
+    returns a job id, so summarising it would paraphrase a hex string."""
+    decision = agent.route_obvious_read_only(
+        "描述一下 chart.png 并总结", "", has_vision=True)
+
+    assert decision.mode == "DIRECT_TOOL"
+    assert decision.response_policy == "DIRECT_FORMATTED"
+
+
+@pytest.mark.parametrize("query", [
+    "描述一下这个目录",                 # vision verb, no image
+    "对比 a.png 和 b.png",             # two images: which one?
+    "你好，喵",
+])
+def test_an_ambiguous_request_still_goes_to_the_model(agent, query) -> None:
+    decision = agent.route_obvious_read_only(query, "", has_vision=True)
+    assert decision is None or \
+        decision.tool_calls[0].name != "describe_image"
+
+
+def test_no_vision_route_without_a_worker(agent) -> None:
+    decision = agent.route_obvious_read_only(
+        "描述一下 chart.png", "", has_vision=False)
+    assert decision is None or \
+        decision.tool_calls[0].name != "describe_image"
+
+
+def test_the_progress_line_says_looking_before_the_first_token(
+        server, queue, workspace, monkeypatch, capsys) -> None:
+    """vision.om and resample.om run first; a bare "0 词" reads as a stall."""
+    queue.submit(workspace / "photo.png", "描述")
+    queue.claim()
+    calls = {"n": 0}
+
+    class FakeStdin:
+        def isatty(self):
+            return True
+
+    def fake_select(rlist, _w, _x, _timeout):
+        calls["n"] += 1
+        return (rlist, [], []) if calls["n"] > 1 else ([], [], [])
+
+    monkeypatch.setattr(server.sys, "stdin", FakeStdin())
+    monkeypatch.setattr(server.select, "select", fake_select)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "x")
+    ui = RecordingUI()
+    ui.paint = lambda text, _code: text
+
+    server.watch_vision(queue, ui, "> ", timeout=0)
+
+    drawn = capsys.readouterr().out
+    assert "正在看图" in drawn
+    assert "0 词" not in drawn

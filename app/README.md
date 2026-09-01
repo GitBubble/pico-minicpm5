@@ -387,6 +387,16 @@ already has `python3`; set `TOKENIZERS` if wheels live under `pylib/`.
 
 ## Vision: deploying a second model beside the agent
 
+<img src="../docs/media/board-vision.gif" alt="Two models on one Hi3403 board" width="100%">
+
+One board session at the speed it ran: a greeting, an image, a listing.
+`描述一下 chart.png` needs no model decision, so the host routes it in
+`3.1 ms` and the job is posted. The description then builds on the prompt
+line while the agent stays available, and lands `21.4 s` later without the
+user pressing a key. The picture it read is
+[`docs/media/vision-demo.png`](../docs/media/vision-demo.png), so the
+description can be checked against it.
+
 `describe_image` hands a picture to MiniCPM-4v-0.5B while MiniCPM5-1B keeps
 answering. The two cannot take turns on the NPU — three resident OM handles
 each — so they run as two processes joined by a job queue. Design and

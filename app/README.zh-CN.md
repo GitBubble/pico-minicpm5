@@ -351,6 +351,14 @@ Jammy / `/usr/lib/svp_npu` 上，`chat.sh` 用
 
 ## 视觉：在 agent 旁边部署第二个模型
 
+<img src="../docs/media/board-vision.gif" alt="一块 Hi3403 上的两个模型" width="100%">
+
+一次板端会话，按它真实的速度播放：打招呼、看图、列目录。
+`描述一下 chart.png` 不需要模型做任何判断，所以主机在 `3.1 ms` 内直接路由并
+提交作业。之后描述在提示符行上逐词生长，agent 全程可用，`21.4 s` 时答案自己
+落下来，用户没有按任何键。它读的那张图是
+[`docs/media/vision-demo.png`](../docs/media/vision-demo.png)，可以拿描述去对。
+
 `describe_image` 把图片交给 MiniCPM-4v-0.5B，同时 MiniCPM5-1B 照常应答。
 两者无法在 NPU 上轮流跑——各自常驻三个 OM 句柄——所以它们是两个进程，
 由作业队列衔接。设计与实测见

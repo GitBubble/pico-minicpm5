@@ -555,3 +555,57 @@ def test_the_progress_line_says_looking_before_the_first_token(
     drawn = capsys.readouterr().out
     assert "正在看图" in drawn
     assert "0 词" not in drawn
+
+
+# ---------------------------------------------------------------------- width
+
+def test_a_cjk_character_counts_as_two_columns(server) -> None:
+    assert server._display_width("abc") == 3
+    assert server._display_width("柱状图") == 6
+    assert server._display_width("图a") == 3
+
+
+def test_the_tail_is_trimmed_to_fit_and_keeps_the_newest_text(server) -> None:
+    """Newest first: the tail is what just arrived, not what arrived first."""
+    assert server._fit("abcdef", 3) == "def"
+    assert server._fit("柱状图", 4) == "状图"
+    # A half-column budget cannot hold a wide character.
+    assert server._fit("柱状图", 1) == ""
+    assert server._fit("anything", 0) == ""
+
+
+def test_the_progress_line_never_exceeds_the_terminal(
+        server, queue, workspace, monkeypatch, capsys) -> None:
+    """A wrapped line cannot be erased by a carriage return.
+
+    \\r returns to the start of the wrapped row, not the original, so an
+    over-wide progress line leaves one leftover row per token instead of
+    updating in place -- twenty-odd rows of it in a 100-column recording.
+    """
+    queue.submit(workspace / "photo.png", "描述")
+    claimed = queue.claim()
+    queue.progress(claimed, "这张图片是一张柱状图，展示了四年的 revenue 情况。" * 4, 40)
+    calls = {"n": 0}
+
+    class FakeStdin:
+        def isatty(self):
+            return True
+
+    def fake_select(rlist, _w, _x, _timeout):
+        calls["n"] += 1
+        return (rlist, [], []) if calls["n"] > 1 else ([], [], [])
+
+    monkeypatch.setattr(server.sys, "stdin", FakeStdin())
+    monkeypatch.setattr(server.select, "select", fake_select)
+    monkeypatch.setattr(server, "_terminal_columns", lambda default=80: 100)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "x")
+    ui = RecordingUI()
+    ui.paint = lambda text, _code: text
+
+    server.watch_vision(queue, ui, "> ", timeout=0)
+
+    drawn = capsys.readouterr().out
+    body = [part for part in drawn.split("\r\033[2K") if "vision ·" in part]
+    assert body, "a progress line should have been drawn"
+    for part in body:
+        assert server._display_width(part) <= 100

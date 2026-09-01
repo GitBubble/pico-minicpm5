@@ -31,9 +31,11 @@ from pathlib import Path
 import struct
 import subprocess
 import select
+import shutil
 import sys
 import threading
 import time
+import unicodedata
 
 try:
     import readline as _readline  # noqa: F401
@@ -121,6 +123,41 @@ def parse_transformer_output_slots(value):
     return slots
 
 
+def _display_width(text):
+    """Columns a string occupies. CJK and full-width forms take two."""
+    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+               for ch in str(text))
+
+
+def _fit(text, columns):
+    """The last ``columns`` columns of ``text``.
+
+    The progress line is erased with a carriage return, which only works
+    while it stays on one row: a line wider than the terminal wraps, and \r
+    then returns to the start of the wrapped row instead of the original.
+    The result is one leftover row per token rather than a line that moves.
+    Chinese counts two columns a character, so a tail measured in characters
+    overflows an 80- or 100-column terminal well before it looks long.
+    """
+    if columns <= 0:
+        return ""
+    kept, used = [], 0
+    for ch in reversed(str(text)):
+        step = 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+        if used + step > columns:
+            break
+        kept.append(ch)
+        used += step
+    return "".join(reversed(kept))
+
+
+def _terminal_columns(default=80):
+    try:
+        return shutil.get_terminal_size((default, 24)).columns
+    except Exception:                                            # noqa: BLE001
+        return default
+
+
 def watch_vision(queue, ui, prompt, messages=None, timeout=0.4):
     """Read one line from the user, showing vision progress while idle.
 
@@ -179,11 +216,12 @@ def watch_vision(queue, ui, prompt, messages=None, timeout=0.4):
         if not job.tokens:
             # vision.om and resample.om run before the first token; a bare
             # "0 词" with nothing after it reads as a stall.
-            line = ui.paint(f"  vision · {name} · 正在看图…", "2;38;5;75")
+            text = f"  vision · {name} · 正在看图…"
         else:
-            tail = (job.partial or "")[-56:]
-            line = ui.paint(f"  vision · {name} · {job.tokens} 词 · {tail}",
-                            "2;38;5;75")
+            head = f"  vision · {name} · {job.tokens} 词 · "
+            text = head + _fit(job.partial or "",
+                               _terminal_columns() - _display_width(head))
+        line = ui.paint(text, "2;38;5;75")
         sys.stdout.write("\r\033[2K" + line)
         sys.stdout.flush()
         drawn = True

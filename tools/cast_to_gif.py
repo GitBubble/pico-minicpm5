@@ -63,7 +63,15 @@ def _first_present(paths, label):
 
 
 def wide(char: str) -> bool:
-    return unicodedata.east_asian_width(char) in ("W", "F")
+    """Does this cell occupy two columns?
+
+    pyte can hand back a cell holding more than one codepoint -- a base
+    character plus combining marks -- and east_asian_width takes exactly one.
+    The base character decides the width; the marks add nothing.
+    """
+    if not char:
+        return False
+    return unicodedata.east_asian_width(char[0]) in ("W", "F")
 
 
 def xterm256(index: int) -> tuple[int, int, int]:

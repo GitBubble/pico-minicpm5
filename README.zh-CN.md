@@ -350,9 +350,11 @@ pip install -e '.[hub,onnx,reference,dev]'
 
 pico-minicpm5 model fetch --local-dir work/model
 pico-minicpm5 model verify --model-dir work/model
-# 导出板端所需的两个运行期资产。分词器是本项目钉住但不镜像的上游文件，
-# 随上面的 checkpoint 一起到达，这一步只是复制而非重建。两个 SHA-256 记在
-# MODEL_PROVENANCE.zh-CN.md 里，并由发布包强制校验。
+# 导出与 OM 并列的两个运行期资产。仅在从源码整树构建时需要：这两个文件同样
+# 发布在 v0.1.0 上，前面「部署预编译 Hi3403 demo」一节直接下载即可，完全不必
+# 下 2 GB 的 checkpoint。两条路得到的字节相同，即 MODEL_PROVENANCE.zh-CN.md
+# 钉住的 tokenizer.json 3e065a55...、token_embedding.f16.bin 5a93b589...，
+# 并由 SHA256SUMS 校验。
 pico-minicpm5 assets --model-dir work/model --out work/deploy/assets
 pico-minicpm5 reference capture --model-dir work/model --out work/reference --context 1024
 pico-minicpm5 reference calibrate --reference work/reference --family decode --out work/calibration/decode

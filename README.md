@@ -388,11 +388,12 @@ pip install -e '.[hub,onnx,reference,dev]'
 pico-minicpm5 model fetch --local-dir work/model
 pico-minicpm5 model verify --model-dir work/model
 
-# 1b. Export the two runtime assets the board needs beside the OM files.
-# The tokenizer is an upstream file this project pins but does not mirror, so
-# it arrives with the checkpoint above and is copied — not rebuilt — here.
-# Both SHA-256 are recorded in MODEL_PROVENANCE.md and enforced by the release
-# bundle: tokenizer.json 3e065a55..., token_embedding.f16.bin 5a93b589...
+# 1b. Export the two runtime assets that sit beside the OM files. Only needed
+# when building the whole tree from source: both are also published on v0.1.0
+# and "Deploy the prebuilt Hi3403 demo" above downloads them directly, which
+# skips the 2 GB checkpoint entirely. Either way the bytes are the same ones
+# MODEL_PROVENANCE.md pins — tokenizer.json 3e065a55...,
+# token_embedding.f16.bin 5a93b589... — and SHA256SUMS checks them.
 pico-minicpm5 assets --model-dir work/model --out work/deploy/assets
 
 # 2. Capture float reference/calibration data from the official checkpoint.

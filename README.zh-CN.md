@@ -350,6 +350,10 @@ pip install -e '.[hub,onnx,reference,dev]'
 
 pico-minicpm5 model fetch --local-dir work/model
 pico-minicpm5 model verify --model-dir work/model
+# 导出板端所需的两个运行期资产。分词器是本项目钉住但不镜像的上游文件，
+# 随上面的 checkpoint 一起到达，这一步只是复制而非重建。两个 SHA-256 记在
+# MODEL_PROVENANCE.zh-CN.md 里，并由发布包强制校验。
+pico-minicpm5 assets --model-dir work/model --out work/deploy/assets
 pico-minicpm5 reference capture --model-dir work/model --out work/reference --context 1024
 pico-minicpm5 reference calibrate --reference work/reference --family decode --out work/calibration/decode
 pico-minicpm5 reference calibrate --reference work/reference --family prefill --out work/calibration/prefill

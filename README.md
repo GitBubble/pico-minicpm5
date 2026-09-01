@@ -388,6 +388,13 @@ pip install -e '.[hub,onnx,reference,dev]'
 pico-minicpm5 model fetch --local-dir work/model
 pico-minicpm5 model verify --model-dir work/model
 
+# 1b. Export the two runtime assets the board needs beside the OM files.
+# The tokenizer is an upstream file this project pins but does not mirror, so
+# it arrives with the checkpoint above and is copied — not rebuilt — here.
+# Both SHA-256 are recorded in MODEL_PROVENANCE.md and enforced by the release
+# bundle: tokenizer.json 3e065a55..., token_embedding.f16.bin 5a93b589...
+pico-minicpm5 assets --model-dir work/model --out work/deploy/assets
+
 # 2. Capture float reference/calibration data from the official checkpoint.
 pico-minicpm5 reference capture \
   --model-dir work/model --out work/reference --context 1024

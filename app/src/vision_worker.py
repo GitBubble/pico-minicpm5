@@ -246,7 +246,7 @@ def serve(queue_root, model_dir, executable, library_paths, poll=2.0,
             try:
                 result = model.look(
                     job.image_path, job.question, max_new,
-                    on_token=lambda text, count: queue.progress(
+                    on_token=lambda text, count, job=job: queue.progress(
                         job, text, count))
             except Exception as error:                       # noqa: BLE001
                 queue.fail(job, f"{type(error).__name__}: {error}")

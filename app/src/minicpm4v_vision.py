@@ -136,7 +136,7 @@ class VocabTable:
         self.id_to_token = {index: token for token, index in self.vocab.items()}
 
     @classmethod
-    def from_tokenizer_json(cls, path) -> "VocabTable":
+    def from_tokenizer_json(cls, path) -> VocabTable:
         source = Path(path)
         if not source.is_file():
             raise VisionError(f"tokenizer not found: {source}")
@@ -188,7 +188,9 @@ class RowTable:
                 f"{self.path.name} is not a whole number of "
                 f"{self.dim}-wide float32 rows")
         self.rows = size // self.row_bytes
-        self._handle = open(self.path, "rb")
+        # Held open on purpose: this table is 300 MB and is read one row
+        # at a time by seek. close() and __exit__ own its lifetime.
+        self._handle = open(self.path, "rb")  # noqa: SIM115
 
     def row(self, index: int) -> np.ndarray:
         position = int(index)
@@ -208,7 +210,7 @@ class RowTable:
     def close(self) -> None:
         self._handle.close()
 
-    def __enter__(self) -> "RowTable":
+    def __enter__(self) -> RowTable:
         return self
 
     def __exit__(self, *exc) -> None:

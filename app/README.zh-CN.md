@@ -2,11 +2,26 @@
 
 [English](README.md)
 
-<img src="../docs/media/board-agent.gif" alt="Hi3403 板端的四轮 agent 会话" width="100%">
+两次板端会话，都录自本目录的 `agent.sh`，真实硬件，按它们运行的速度播放。
+没有加速，也没有剪辑。
 
-录自本目录的 `agent.sh`，真实板端会话，按它运行的速度播放：一句问候、一次
-经显式批准的写文件、一次用来验证该写入的目录列举，以及一个精确的
-`swish(2)`。没有加速，也没有剪辑。
+**工具调用 —— 单模型**
+
+<img src="../docs/media/board-agent.gif" alt="Hi3403 板端的四轮工具调用 agent 会话" width="100%">
+
+一句问候、一次经显式批准的写文件、一次用来验证该写入的目录列举，
+以及一个精确的 `swish(2)`。
+
+**多模态 —— 两个模型同时在跑**
+
+<img src="../docs/media/board-vision.gif" alt="MiniCPM5-1B 与 MiniCPM-4v-0.5B 在同一块 Hi3403 上协同" width="100%">
+
+打招呼、看图、列目录。`描述一下 chart.png` 不需要模型做任何判断，所以主机在
+`3.1 ms` 内直接路由，把作业交给 MiniCPM-4v-0.5B。描述在提示符行上逐词生长，
+MiniCPM5-1B 全程可用，`21.4 s` 时答案自己落下来，用户没有按任何键。它读的那
+张图是 [`docs/media/vision-demo.png`](../docs/media/vision-demo.png)，可以拿
+描述去对。部署方式见下面的
+[视觉章节](#视觉在-agent-旁边部署第二个模型)。
 
 本目录是板端用户入口。以下步骤假设 `/opt/pico-minicpm5` 下已经装配好一套
 部署——运行时归档取自 `v0.2.0` Release，模型文件取自 `v0.1.0`，装配方式见项目
@@ -351,13 +366,7 @@ Jammy / `/usr/lib/svp_npu` 上，`chat.sh` 用
 
 ## 视觉：在 agent 旁边部署第二个模型
 
-<img src="../docs/media/board-vision.gif" alt="一块 Hi3403 上的两个模型" width="100%">
-
-一次板端会话，按它真实的速度播放：打招呼、看图、列目录。
-`描述一下 chart.png` 不需要模型做任何判断，所以主机在 `3.1 ms` 内直接路由并
-提交作业。之后描述在提示符行上逐词生长，agent 全程可用，`21.4 s` 时答案自己
-落下来，用户没有按任何键。它读的那张图是
-[`docs/media/vision-demo.png`](../docs/media/vision-demo.png)，可以拿描述去对。
+本页顶部的第二段录像就是本节跑起来的样子。
 
 `describe_image` 把图片交给 MiniCPM-4v-0.5B，同时 MiniCPM5-1B 照常应答。
 两者无法在 NPU 上轮流跑——各自常驻三个 OM 句柄——所以它们是两个进程，

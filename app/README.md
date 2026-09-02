@@ -2,11 +2,27 @@
 
 [中文说明](README.zh-CN.md)
 
-<img src="../docs/media/board-agent.gif" alt="A four-turn agent session on an Hi3403 board" width="100%">
+Two board sessions, both recorded from this directory's `agent.sh` on real
+hardware and played at the speed they ran. Nothing is sped up or cut.
 
-Recorded from this directory's `agent.sh` on a real board and played at the
-speed it ran: a greeting, a file written under explicit approval, the listing
-that confirms the write, and an exact `swish(2)`. Nothing is sped up or cut.
+**Tool calling — one model**
+
+<img src="../docs/media/board-agent.gif" alt="A four-turn tool-calling agent session on an Hi3403 board" width="100%">
+
+A greeting, a file written under explicit approval, the listing that confirms
+the write, and an exact `swish(2)`.
+
+**Multimodal — two models at once**
+
+<img src="../docs/media/board-vision.gif" alt="MiniCPM5-1B and MiniCPM-4v-0.5B running together on one Hi3403 board" width="100%">
+
+A greeting, an image, a listing. `描述一下 chart.png` needs no model decision,
+so the host routes it in `3.1 ms` and posts the job to MiniCPM-4v-0.5B. The
+description builds on the prompt line while MiniCPM5-1B stays available, and
+lands `21.4 s` later without the user pressing a key. The picture it read is
+[`docs/media/vision-demo.png`](../docs/media/vision-demo.png), so the
+description can be checked against it. Deployment is in
+[Vision](#vision-deploying-a-second-model-beside-the-agent) below.
 
 This directory is the board-user entry point. It assumes a deployment has
 already been assembled under `/opt/pico-minicpm5` — the runtime archive from
@@ -387,15 +403,7 @@ already has `python3`; set `TOKENIZERS` if wheels live under `pylib/`.
 
 ## Vision: deploying a second model beside the agent
 
-<img src="../docs/media/board-vision.gif" alt="Two models on one Hi3403 board" width="100%">
-
-One board session at the speed it ran: a greeting, an image, a listing.
-`描述一下 chart.png` needs no model decision, so the host routes it in
-`3.1 ms` and the job is posted. The description then builds on the prompt
-line while the agent stays available, and lands `21.4 s` later without the
-user pressing a key. The picture it read is
-[`docs/media/vision-demo.png`](../docs/media/vision-demo.png), so the
-description can be checked against it.
+The second recording at the top of this page is this section working.
 
 `describe_image` hands a picture to MiniCPM-4v-0.5B while MiniCPM5-1B keeps
 answering. The two cannot take turns on the NPU — three resident OM handles

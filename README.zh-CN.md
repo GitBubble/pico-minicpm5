@@ -2,16 +2,27 @@
 
 [English](README.md) · [板端 Demo](app/README.zh-CN.md)
 
-<img src="docs/media/board-agent.gif" alt="Hi3403 板端的四轮 agent 会话" width="100%">
+两次板端会话，按它们真实运行的速度播放。没有加速，也没有剪辑，所以屏幕上的每
+一个数字都是板子当时给出的。
 
-一次板端会话，按它真实运行的速度播放。没有加速，也没有剪辑，所以屏幕上的每一个
-数字都是板子当时给出的。
+**会调用工具的 agent —— 单模型**
+
+<img src="docs/media/board-agent.gif" alt="Hi3403 板端的四轮工具调用 agent 会话" width="100%">
 
 问候在 `3.2 s` 后得到回答，因为不需要工具的轮次不会被披露任何工具 schema。写文件
 需要，那也就是慢的那一轮：`395` 个 prompt token，每个 `79.5 ms`——进度条把它数出来，
 而不是藏起来。之后两轮根本没有惊动模型：列目录 `1.8 ms`，`swish(2)` `0.7 ms`，
 由 Python 算出，因为这个数模型自己会算错。列目录同时也是对写入的验证：`a.txt`
 就在里面。
+
+**多模态 agent —— 一颗 NPU 上的两个模型**
+
+<img src="docs/media/board-vision.gif" alt="MiniCPM5-1B 与 MiniCPM-4v-0.5B 在同一块 Hi3403 上协同" width="100%">
+
+`描述一下 chart.png` 在 `3.1 ms` 内被路由，交给跑在自己进程里、由作业队列衔接的
+MiniCPM-4v-0.5B。描述在提示符行上逐词生长，MiniCPM5-1B 全程可用，`21.4 s` 时答案
+自己落下来，用户没有按任何键。它读的那张图是
+[`docs/media/vision-demo.png`](docs/media/vision-demo.png)，可以拿描述去对。
 
 `pico-minicpm5` 将固定版本的
 [`openbmb/MiniCPM5-1B`](https://huggingface.co/openbmb/MiniCPM5-1B)
@@ -27,6 +38,13 @@ Hugging Face checkpoint
 
 生产路线是在编译前组合 ONNX 图，而不是拼接多个 OM 二进制。图编译器统一负责
 内存分配、指令调度、TaskInfo 和层间 hidden bridge。
+
+这套三句柄部署旁边还并行跑着第二个模型。MiniCPM-4v-0.5B 负责看图；由于两个模型
+各自常驻三个 OM 句柄而 NPU 只有一颗，它们无法轮流跑——因此作为两个独立进程、
+由文件系统作业队列衔接，提交一张图不会阻塞对话。该模型的 `decode.om` 声明 53
+输入 49 输出，超过本 SDK 的 32 端口上限装不进去，所以每个词都靠在它 200 行的窗口
+上追加已生成部分、重跑 prefill 得到。设计、实测与部署见
+[一颗 NPU 上的两个模型](docs/MULTIMODAL_VISION.zh-CN.md)。
 
 ## 当前状态
 
@@ -70,6 +88,12 @@ prefill 窗口契约。实测三档的 position-0 transformer 时间相差 `0.39
 为准，`ctx8192` 与参考逐 token 一致，而 `ctx1024` 与 `ctx4096` 会早停一个
 token、少了一个句号——不构成阻塞，原因见
 [严格 EOS 说明](release/contexts/strict-eos-oracle.md)。
+
+视觉 skill 是**板端已验证**而非**已过数值门**：它没有数值 oracle，因为答案是
+一句话。Hi3403 端到端实测，1440x900 截图、40 词上限——worker 领取 `1.02 s`、
+首词可见 `1.98 s`、`0.52 s`/词平直、完成 `22.56 s`。每词那笔开销是一次完整
+prefill，在本 SDK 上降不下来；队列的作用是让它不占用对话。4v 模型文件属
+owner-supplied，此处不重新分发。
 
 长 prompt 是短板：token 仍然逐个送入，512 token 的 prompt 在 ctx1024 上约需
 `41 s`。能摊薄这笔开销的 fail-closed native-prefill 调度器已经实现了
